@@ -1,0 +1,16 @@
+import { Router } from 'express';
+import authRoutes from './auth.routes';
+import eventRoutes from './event.routes';
+import sessionRoutes from './session.routes';
+import userRoutes from './user.routes';
+import speakerRoutes from './speaker.routes';
+
+const router = Router();
+
+router.use('/auth', authRoutes);
+router.use('/events', eventRoutes);
+router.use('/sessions', sessionRoutes);
+router.use('/users', userRoutes);
+router.use('/speakers', speakerRoutes);
+
+export default router;
