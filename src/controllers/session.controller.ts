@@ -1,8 +1,12 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import Session, { ISession, IParticipantSession } from '../models/session.model';
 import ChatMessage from '../models/chatMessage.model';
 import Poll from '../models/poll.model';
 import Question from '../models/question.model';
+import { uploadFile } from '../services/s3.service';
+import Event from '../models/event.model';
+import { sendSessionStartedEmail } from '../services/mail.service';
 
 /**
  * Create a new session for an event
@@ -19,8 +23,11 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const sessionCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+
     const session = new Session({
       eventId,
+      sessionCode,
       organizerId: userId,
       title,
       description,
@@ -312,6 +319,23 @@ export const startSession = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    // Send email notifications to all attendees
+    try {
+      const event = await Event.findById(session.eventId).populate('attendees');
+      if (event && event.attendees && event.attendees.length > 0) {
+        const joinLink = `${process.env.FRONTEND_URL}/events/session/${session.sessionCode || 'join'}`;
+
+        // Send asynchronously
+        event.attendees.forEach(async (attendee: any) => {
+          if (attendee.email) {
+            await sendSessionStartedEmail(attendee.email, attendee.name || 'Attendee', session.title, joinLink);
+          }
+        });
+      }
+    } catch (emailError) {
+      console.error("Failed to send session started emails:", emailError);
+    }
+
     res.status(200).json({
       message: 'Session started successfully',
       data: session,
@@ -589,6 +613,58 @@ export const manualCheckOut = async (req: Request, res: Response): Promise<void>
   } catch (error) {
     console.error('Manual check-out error:', error);
     res.status(500).json({ message: 'Failed to log check-out', error });
+  }
+};
+
+/**
+ * Upload session recording
+ */
+export const uploadRecording = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!req.file) {
+      res.status(400).json({ message: 'No recording file provided' });
+      return;
+    }
+
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      res.status(404).json({ message: 'Session not found' });
+      return;
+    }
+
+    // Upload to R2
+    const fileKey = `recordings/${sessionId}/${Date.now()}-${req.file.originalname}`;
+    // Assuming mimetype is correct
+    const fileUrl = await uploadFile(req.file, fileKey, req.file.mimetype);
+
+    // Update session with recording URL
+    session.recordingUrl = fileUrl;
+    session.recordingStatus = 'processed';
+    await session.save();
+
+    // Log the action
+    try {
+      const { logAction } = await import("../services/auditLog.service");
+      await logAction({
+        userId: req.user?.userId || 'system',
+        action: 'RECORDING_UPLOAD',
+        resourceId: sessionId,
+        resourceType: 'SESSION',
+        details: { fileUrl }
+      });
+    } catch (e) {
+      console.error("Failed to audit log recording upload", e);
+    }
+
+    res.status(200).json({
+      message: 'Recording uploaded successfully',
+      data: { url: fileUrl }
+    });
+  } catch (error) {
+    console.error('Upload recording error:', error);
+    res.status(500).json({ message: 'Failed to upload recording', error });
   }
 };
 

@@ -6,6 +6,8 @@ import ChatMessage from '../models/chatMessage.model';
 import Poll from '../models/poll.model';
 import Question from '../models/question.model';
 import { hasPermission } from '../middleware/rbac.middleware';
+import { logCheckIn, logCheckOut } from './attendance.service';
+import ActivityLog from '../models/activityLog.model';
 
 /**
  * Real-Time Event Handlers for WebSocket
@@ -19,6 +21,16 @@ export const sendNotification = (userId: string, type: string, payload: any) => 
   if (notificationNamespace) {
     notificationNamespace.to(userId).emit('notification', {
       type,
+      ...payload,
+      timestamp: new Date(),
+    });
+  }
+};
+
+// Helper to send stats update
+export const sendStatsUpdate = (userId: string, payload: any) => {
+  if (notificationNamespace) {
+    notificationNamespace.to(userId).emit('stats-update', {
       ...payload,
       timestamp: new Date(),
     });
@@ -131,6 +143,32 @@ export const initializeWebSocket = (io: Server) => {
           timestamp: new Date(),
         });
 
+        // Trigger Analytics Update for Organizer
+        if (session.organizerId) {
+          sendStatsUpdate(session.organizerId.toString(), {
+            type: 'attendance',
+            eventId: session.eventId,
+            sessionId: session._id,
+            delta: 1,
+            total: session.participants.length
+          });
+        }
+
+        // Log Check-in
+        try {
+          await logCheckIn({
+            eventId: session.eventId.toString(),
+            sessionId,
+            userId,
+            userEmail: socket.data.user?.email || "",
+            userName: socket.data.user?.name || "Unknown",
+            // req object is not available here, but we can pass IP/UserAgent from handshake if needed
+            // For now, we'll let service handle missing req
+          });
+        } catch (logError) {
+          console.error("Failed to log check-in in WS:", logError);
+        }
+
         socket.emit('session-joined', {
           message: 'Successfully joined session',
           participants: session.participants.length,
@@ -168,8 +206,82 @@ export const initializeWebSocket = (io: Server) => {
           participantCount: session?.participants.length || 0,
           timestamp: new Date(),
         });
+
+        // Trigger Analytics Update for Organizer
+        if (session && session.organizerId) {
+          sendStatsUpdate(session.organizerId.toString(), {
+            type: 'attendance',
+            eventId: session.eventId,
+            sessionId: session._id,
+            delta: -1,
+            total: session.participants.length
+          });
+        }
+
+        // Log Check-out
+        try {
+          await logCheckOut({
+            sessionId,
+            userId,
+          });
+        } catch (logError) {
+          console.error("Failed to log check-out in WS:", logError);
+        }
       } catch (error) {
         console.error('Leave session error:', error);
+      }
+    });
+
+    socket.on('end-session', async (data) => {
+      try {
+        const { sessionId } = data;
+        const userId = socket.data.user?.userId;
+
+        // Validate Moderator/Host permission
+        // For now assuming only specific roles or if user is organizer check. 
+        // Better to use RBAC middleware function if available or check session ownership.
+        // Let's check session ownership for safety first.
+        const session = await Session.findById(sessionId);
+        if (!session) return;
+
+        if (session.organizerId.toString() !== userId) {
+          socket.emit('error', { message: 'Only the organizer can end the session' });
+          return;
+        }
+
+        // Update Session
+        session.status = 'ended';
+        session.actualEndTime = new Date();
+        // Mark all active participants as left
+        session.participants.forEach(p => {
+          if (!p.leftAt) p.leftAt = new Date();
+        });
+        await session.save();
+
+        // Broadcast to room
+        sessionNamespace.to(sessionId).emit('session-ended', {
+          endedBy: userId,
+          timestamp: new Date()
+        });
+
+        // Stats update for organizer (redundant since they ended it, but for consistency)
+        sendStatsUpdate(userId, {
+          type: 'session_ended',
+          eventId: session.eventId,
+          sessionId: session._id
+        });
+
+        // Log Activity
+        await ActivityLog.create({
+          user: userId,
+          action: "SESSION_ENDED",
+          details: { sessionId },
+          ip: socket.handshake.address
+        });
+
+      } catch (error) {
+        console.error('End session error:', error);
+        socket.emit('error', { message: 'Failed to end session' });
       }
     });
 
@@ -208,6 +320,18 @@ export const initializeWebSocket = (io: Server) => {
           senderName: socket.data.user?.name,
           content: message.content,
           timestamp: message.createdAt,
+        });
+
+        // Log Activity
+        await ActivityLog.create({
+          user: userId,
+          action: "CHAT_MESSAGE",
+          details: {
+            sessionId,
+            messageId: message._id,
+            contentLength: message.content.length
+          },
+          ip: socket.handshake.address
         });
 
         socket.emit('message-sent', { messageId: message._id });
@@ -305,6 +429,29 @@ export const initializeWebSocket = (io: Server) => {
           respondentCount: poll.respondents.length,
         });
 
+        // Analytics Update for Poll Response
+        const session = await Session.findById(sessionId);
+        if (session && session.organizerId) {
+          sendStatsUpdate(session.organizerId.toString(), {
+            type: 'poll_response',
+            eventId: session.eventId,
+            sessionId: sessionId,
+            pollId
+          });
+        }
+
+        // Log Activity
+        await ActivityLog.create({
+          user: userId,
+          action: "POLL_RESPONSE",
+          details: {
+            sessionId,
+            pollId,
+            answersCount: answers.length
+          },
+          ip: socket.handshake.address
+        });
+
         socket.emit('poll-voted', { pollId });
       } catch (error) {
         console.error('Vote poll error:', error);
@@ -344,6 +491,18 @@ export const initializeWebSocket = (io: Server) => {
           askedByName: socket.data.user?.name,
           content: question.content,
           timestamp: question.createdAt,
+        });
+
+        // Log Activity
+        await ActivityLog.create({
+          user: userId,
+          action: "QUESTION_ASKED",
+          details: {
+            sessionId,
+            questionId: question._id,
+            contentLength: question.content.length
+          },
+          ip: socket.handshake.address
         });
 
         socket.emit('question-asked', { questionId: question._id });
@@ -482,6 +641,16 @@ export const initializeWebSocket = (io: Server) => {
     });
 
     /**
+     * FILE TRANSFER EVENTS
+     */
+    socket.on('file-transfer', (data) => {
+      const { sessionId, transferData } = data;
+      const userId = socket.data.user?.userId;
+      // Broadcast to all other participants in the session
+      socket.to(sessionId).emit('file-transfer', { transferData, fromUserId: userId });
+    });
+
+    /**
      * DISCONNECT HANDLER
      */
 
@@ -505,6 +674,28 @@ export const initializeWebSocket = (io: Server) => {
               userId: socket.data.user?.userId,
               participantCount: session.participants.length,
             });
+
+            // Trigger Analytics Update for Organizer
+            if (session.organizerId) {
+              sendStatsUpdate(session.organizerId.toString(), {
+                type: 'attendance',
+                eventId: session.eventId,
+                sessionId: session._id,
+                delta: -1,
+                total: session.participants.length
+              });
+            }
+
+            // Log Check-out on disconnect
+            try {
+              // We need the sessionId here, which is the room id
+              await logCheckOut({
+                sessionId: room,
+                userId: socket.data.user?.userId,
+              });
+            } catch (logError) {
+              // Ignore error if check-out already happened or session invalid
+            }
           }
         }
       });
@@ -515,4 +706,3 @@ export const initializeWebSocket = (io: Server) => {
 };
 
 export default initializeWebSocket;
-

@@ -1,5 +1,6 @@
-import AttendanceLog from "../models/attendanceLog.model";
 import { Request } from "express";
+import AttendanceLog from "../models/attendanceLog.model";
+import ActivityLog from "../models/activityLog.model";
 
 interface CheckInOptions {
     eventId: string;
@@ -203,5 +204,57 @@ export const getEventAttendanceStats = async (eventId: string) => {
             activeNow: 0,
             avgDuration: 0
         };
+    }
+};
+
+/**
+ * Get detailed activity logs for an attendee in an event
+ * Aggregates session attendance, chat, and poll activities
+ */
+export const getAttendeeActivityLogs = async (userId: string, eventId: string) => {
+    try {
+        // 1. Get Session Attendance Logs
+        const attendanceLogs = await AttendanceLog.find({ userId, eventId })
+            .sort({ checkInTime: 1 })
+            .lean();
+
+        // 2. Get Activity Logs (Chat, Polls, etc.)
+        // We filter ActivityLogs by the sessions belonging to this event
+        // derived from the attendance logs.
+        // Note: If a user did something without checking in (edge case), it might be missed here,
+        // but generally activity happens within a session.
+        const sessionIds = attendanceLogs.map(log => log.sessionId);
+
+        const activityLogs = await ActivityLog.find({
+            user: userId,
+            'details.sessionId': { $in: sessionIds }
+        }).sort({ createdAt: 1 }).lean();
+
+        // 3. Merge and format
+        const combinedLogs = [
+            ...attendanceLogs.map(log => ({
+                id: log._id,
+                type: 'SESSION_JOIN',
+                timestamp: log.checkInTime,
+                details: { sessionId: log.sessionId }
+            })),
+            ...attendanceLogs.filter(log => log.checkOutTime).map(log => ({
+                id: `${log._id}_leave`,
+                type: 'SESSION_LEAVE',
+                timestamp: log.checkOutTime,
+                details: { sessionId: log.sessionId, duration: log.durationMinutes }
+            })),
+            ...activityLogs.map(log => ({
+                id: log._id,
+                type: log.action,
+                timestamp: log.createdAt,
+                details: log.details
+            }))
+        ].sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        return combinedLogs;
+    } catch (error) {
+        console.error("Failed to fetch attendee activity logs:", error);
+        return [];
     }
 };

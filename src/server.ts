@@ -4,11 +4,15 @@ import app from './app';
 import { initializeWebSocket } from './services/websocket.service';
 import { connectDB } from './config/db';
 import { config } from './config';
+import { seedUsers } from './seed';
 
 const PORT = config.port;
 
 // Connect to Database
-connectDB();
+connectDB().then(() => {
+  // Run Seeding Script
+  seedUsers();
+});
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -28,7 +32,7 @@ initializeWebSocket(io);
 app.set('io', io);
 
 server.listen(PORT, () => {
-  console.log(`🚀 EVENTLIVE server running on port ${PORT}`);
-  console.log(`🔌 WebSocket server ready`);
+  console.log(`EVENTLIVE server running on port ${PORT}`);
+  console.log(`WebSocket server ready`);
 });
 

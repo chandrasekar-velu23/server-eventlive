@@ -14,6 +14,23 @@ interface LogChangeOptions {
 }
 
 /**
+ * Log a generic action (used by session controller)
+ */
+export const logAction = async (data: {
+    userId: string;
+    action: string;
+    resourceId: string;
+    resourceType: string;
+    details?: any;
+}) => {
+    // For now, we'll just log to console as the EventChangeLog model might not support this structure directly
+    // Or we map it to EventChangeLog if appropriate, but the schema seems specific to event changes.
+    // Let's create a simple implementation that logs to console for now to satisfy the controller requirement
+    // In a real app, this should probably be a separate collection or the schema should be updated.
+    console.log(`[AUDIT ACTION] ${data.action} by ${data.userId} on ${data.resourceType}:${data.resourceId}`, data.details);
+};
+
+/**
  * Log a change to an event for admin audit trail
  */
 export const logEventChange = async (options: LogChangeOptions): Promise<void> => {

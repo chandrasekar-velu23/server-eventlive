@@ -5,6 +5,7 @@ import Session from '../models/session.model';
 import User from '../models/user.model';
 import { sendEventCreationNotificationToAdmin, sendSessionFeedbackEmail, sendEnrollmentConfirmation } from '../services/mail.service';
 import { sendNotification } from '../services/websocket.service';
+import { config } from '../config';
 
 export const createEvent = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -49,7 +50,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
       sessionCode,
       // Logic: Create a direct link for attendees
-      shareableLink: `${process.env.FRONTEND_URL || "http://localhost:5173"}/join/${sessionCode}`,
+      shareableLink: `${config.frontendUrl}/join/${sessionCode}`,
       coverImage: coverImage || "",
 
       type: type || 'virtual', // Legacy support
@@ -67,7 +68,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
     // Trigger Admin Notification
     // We do this asynchronously without awaiting to not block response
-    sendEventCreationNotificationToAdmin(newEvent, newEvent.organizerDisplayName || "Organizer").catch(err => console.error(err));
+    sendEventCreationNotificationToAdmin(newEvent, newEvent.organizerDisplayName || "Organizer").catch((err: any) => console.error(err));
 
     res.status(201).json({
       message: "Event created successfully",
@@ -248,7 +249,7 @@ export const enrollEvent = async (req: Request, res: Response): Promise<void> =>
     // Send Enrollment Confirmation Email
     if (userEmail) {
       try {
-        const eventLink = event.shareableLink || `${process.env.FRONTEND_URL}/events/${event._id}`;
+        const eventLink = event.shareableLink || `${config.frontendUrl}/events/${event._id}`;
         const sessionCode = event.sessionCode || event._id.toString().substring(0, 8).toUpperCase();
 
         await sendEnrollmentConfirmation(
@@ -256,7 +257,11 @@ export const enrollEvent = async (req: Request, res: Response): Promise<void> =>
           userName,
           event.title,
           eventLink,
-          sessionCode
+          sessionCode,
+          event.startTime,
+          event.endTime,
+          event.description,
+          "Virtual - EventLive"
         );
         console.log(`Enrollment confirmation sent to ${userEmail}`);
       } catch (emailError) {
@@ -271,7 +276,7 @@ export const enrollEvent = async (req: Request, res: Response): Promise<void> =>
         eventId: id,
         userId,
         sessionCode: event.sessionCode || event._id.toString().substring(0, 8).toUpperCase(),
-        eventLink: event.shareableLink || `${process.env.FRONTEND_URL}/events/${event._id}`
+        eventLink: event.shareableLink || `${config.frontendUrl}/events/${event._id}`
       }
     });
 
@@ -465,16 +470,27 @@ export const uploadCoverImage = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    // Construct public URL with new organized path
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
-    const coverUrl = `${baseUrl}/public/uploads/events/covers/${file.filename}`;
+    const { getPublicUrl } = await import("../services/s3.service");
+    let coverUrl: string;
+
+    if (file.key) {
+      // Prioritize key from S3/R2 upload and construct public URL
+      coverUrl = getPublicUrl(file.key);
+    } else if (file.location) {
+      // Fallback to location if key is missing (unlikely with multer-s3)
+      coverUrl = file.location;
+    } else {
+      // Local upload fallback
+      const protocol = req.protocol;
+      const host = req.get('host');
+      const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+      coverUrl = `${baseUrl}/public/uploads/events/covers/${file.filename}`;
+    }
 
     res.status(200).json({
       message: "Cover uploaded successfully",
       url: coverUrl,
-      filename: file.filename
+      filename: file.filename || file.key
     });
 
   } catch (error) {
@@ -491,16 +507,25 @@ export const uploadLogoImage = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Construct public URL for logo
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
-    const logoUrl = `${baseUrl}/public/uploads/events/logos/${file.filename}`;
+    const { getPublicUrl } = await import("../services/s3.service");
+    let logoUrl: string;
+
+    if (file.key) {
+      logoUrl = getPublicUrl(file.key);
+    } else if (file.location) {
+      logoUrl = file.location;
+    } else {
+      // Construct public URL for logo
+      const protocol = req.protocol;
+      const host = req.get('host');
+      const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+      logoUrl = `${baseUrl}/public/uploads/events/logos/${file.filename}`;
+    }
 
     res.status(200).json({
       message: "Logo uploaded successfully",
       url: logoUrl,
-      filename: file.filename
+      filename: file.filename || file.key
     });
 
   } catch (error) {

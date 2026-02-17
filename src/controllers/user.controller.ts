@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import path from "path";
 import User from '../models/user.model';
 import ActivityLog from '../models/activityLog.model';
 import { sendProfileUpdateNotificationToUser, sendProfileUpdateNotificationToAdmin } from '../services/mail.service';
@@ -121,10 +122,23 @@ export const uploadAvatar = async (req: Request, res: Response): Promise<void> =
         }
 
         const userId = (req as any).user?.id;
-        // Construct public URL pointing to backend
-        const protocol = req.protocol;
-        const host = req.get('host');
-        const avatarUrl = `${protocol}://${host}/public/uploads/avatars/${file.filename}`;
+
+        const { getPublicUrl } = await import("../services/s3.service");
+        let avatarUrl: string;
+
+        if (file.key) {
+            // S3/R2 Upload using key to generate public URL
+            avatarUrl = getPublicUrl(file.key);
+        } else if (file.location) {
+            // Fallback
+            avatarUrl = file.location;
+        } else {
+            // Local Upload
+            const protocol = req.protocol;
+            const host = req.get('host');
+            const baseUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+            avatarUrl = `${baseUrl}/public/uploads/avatars/${file.filename}`;
+        }
 
         const user = await User.findByIdAndUpdate(userId, { avatar: avatarUrl }, { new: true }).select('-password');
 
@@ -136,7 +150,7 @@ export const uploadAvatar = async (req: Request, res: Response): Promise<void> =
         await ActivityLog.create({
             user: userId,
             action: "Avatar Update",
-            details: { filename: file.filename },
+            details: { filename: file.filename || path.basename(avatarUrl) },
             ip: req.ip
         });
 

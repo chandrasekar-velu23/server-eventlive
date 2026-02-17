@@ -13,10 +13,15 @@ export interface IEvent extends Document {
   shortSummary?: string;
   timezone?: string;
   category?: string;
+  tags?: string[];
   accessType?: 'Free' | 'Paid' | 'Invite-only';
   capacity?: number;
   organizerDisplayName?: string;
   organizerLogo?: string;
+  organizerWebsite?: string;
+  organizerEmail?: string;
+  organizerPhone?: string;
+  organizerDescription?: string;
   brandAccentColor?: string;
   status: 'Draft' | 'Published';
 
@@ -42,9 +47,14 @@ const EventSchema: Schema = new Schema({
   startTime: { type: Date, required: true },
   endTime: { type: Date, required: true },
   timezone: { type: String, default: "UTC" },
+  tags: [{ type: String }],
   organizerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   organizerDisplayName: { type: String },
   organizerLogo: { type: String },
+  organizerWebsite: { type: String },
+  organizerEmail: { type: String },
+  organizerPhone: { type: String },
+  organizerDescription: { type: String },
   brandAccentColor: { type: String },
 
   sessionCode: { type: String, unique: true, required: true },

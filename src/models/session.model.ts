@@ -20,6 +20,9 @@ export interface ISession extends Document {
   eventId: mongoose.Types.ObjectId;
   organizerId: mongoose.Types.ObjectId;
   title: string;
+  sessionCode: string;
+  recordingUrl?: string;
+  recordingStatus?: 'processing' | 'processed' | 'failed';
   description?: string;
   scheduledStartTime: Date;
   duration: number; // in minutes
@@ -59,6 +62,9 @@ const SessionSchema = new Schema<ISession>(
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     organizerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     title: { type: String, required: true },
+    sessionCode: { type: String, required: true, unique: true },
+    recordingUrl: { type: String },
+    recordingStatus: { type: String, enum: ['processing', 'processed', 'failed'] },
     description: { type: String },
     scheduledStartTime: { type: Date, required: true },
     duration: { type: Number, required: true }, // minutes

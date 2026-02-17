@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
+import fs from "fs";
 import path from "path";
+import { config } from "../config";
 
 /* ===================================================================
  * EMAIL CONFIGURATION
@@ -12,9 +14,6 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
 });
-
-// ✅ FIXED: Corrected logo path to match actual filename
-const logoPath = path.resolve(__dirname, "../../public/logo-EventLive.svg");
 
 // Email configuration
 const EMAIL_CONFIG = {
@@ -30,6 +29,28 @@ const EMAIL_CONFIG = {
 };
 
 /* ===================================================================
+ * LOGO EMBEDDING
+ * =================================================================== */
+
+/**
+ * Convert SVG logo to base64 data URI for embedding
+ */
+const getLogoDataURI = (): string => {
+  try {
+    const logoPath = path.resolve(__dirname, "../../../eventlive-client/public/logo-EventLive.svg");
+    const logoSvg = fs.readFileSync(logoPath, "utf8");
+    const base64Logo = Buffer.from(logoSvg).toString("base64");
+    return `data:image/svg+xml;base64,${base64Logo}`;
+  } catch (error) {
+    console.error("Error loading logo:", error);
+    // Fallback: return empty data URI
+    return "";
+  }
+};
+
+const LOGO_DATA_URI = getLogoDataURI();
+
+/* ===================================================================
  * HELPER FUNCTIONS
  * =================================================================== */
 
@@ -43,27 +64,51 @@ const getGreetingTime = (): string => {
   return "Good Evening";
 };
 
-/**
- * Generate plain text version from HTML
- */
-const htmlToPlainText = (html: string): string => {
-  return html
-    .replace(/<style[^>]*>.*?<\/style>/gi, "")
-    .replace(/<script[^>]*>.*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+const getUnsubscribeLink = (email: string): string => {
+  return `${config.frontendUrl}/unsubscribe?email=${encodeURIComponent(email)}`;
 };
 
 /**
- * Generate unsubscribe link
+ * Generate iCalendar (ICS) string
  */
-const getUnsubscribeLink = (email: string): string => {
-  return `${process.env.FRONTEND_URL}/unsubscribe?email=${encodeURIComponent(email)}`;
+const generateICS = (
+  eventTitle: string,
+  description: string,
+  startTime: Date,
+  endTime: Date,
+  location: string = "Virtual - EventLive",
+  organizerName: string = "EventLive",
+  organizerEmail: string = "no-reply@eventlive.com"
+): string => {
+  const formatDate = (date: Date): string => {
+    return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  };
+
+  const now = formatDate(new Date());
+  const start = formatDate(new Date(startTime));
+  const end = formatDate(new Date(endTime));
+
+  return `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//EventLive//Virtual Events//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:${now}-${startTime.getTime()}@eventlive.com
+DTSTAMP:${now}
+DTSTART:${start}
+DTEND:${end}
+SUMMARY:${eventTitle}
+DESCRIPTION:${description}
+LOCATION:${location}
+ORGANIZER;CN=${organizerName}:mailto:${organizerEmail}
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR`.trim();
 };
 
 /* ===================================================================
- * ENHANCED BASE TEMPLATE (Mobile-Responsive, Accessible)
+ * MODERN RESPONSIVE EMAIL TEMPLATE
  * =================================================================== */
 
 const baseTemplate = (content: string, email: string = "") => `
@@ -74,6 +119,9 @@ const baseTemplate = (content: string, email: string = "") => `
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
   <title>EventLive</title>
   <!--[if mso]>
   <noscript>
@@ -85,12 +133,13 @@ const baseTemplate = (content: string, email: string = "") => `
   </noscript>
   <![endif]-->
   <style>
-    /* Reset Styles */
+    /* ===== CLIENT-SPECIFIC STYLES ===== */
     body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
     table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
     img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
     
-    /* Base Styles */
+    /* ===== RESET STYLES ===== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       margin: 0 !important;
       padding: 0 !important;
@@ -98,222 +147,468 @@ const baseTemplate = (content: string, email: string = "") => `
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       line-height: 1.6;
       color: #1f2937;
-      background-color: #f9fafb;
+      background-color: #f3f4f6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
     
-    /* Container */
+    /* ===== CONTAINER ===== */
+    .email-wrapper {
+      width: 100%;
+      background-color: #f3f4f6;
+      padding: 20px 0;
+    }
+    
     .email-container {
       max-width: 600px;
       margin: 0 auto;
       background-color: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
     
-    /* Header */
-    .header {
+    /* ===== HEADER ===== */
       text-align: center;
-      padding: 30px 20px;
-      background: linear-gradient(135deg, #FF5722 0%, #ff7849 100%);
-      border-bottom: 4px solid #e64a19;
+      padding: 40px 20px;
+      // Indigo Gradient
+      background: linear-gradient(135deg, #4F46E5 0%, #4338ca 100%);
+      position: relative;
+    }
+    
+    .header::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #3730A3 0%, #4338ca 100%);
+    }
+    
+    .logo-container {
+      display: inline-block;
+    }
+    
+    .logo-img {
+      display: block;
+      width: 200px;
+      height: auto;
+      margin: 0 auto;
+      max-width: 100%;
     }
     
     .logo-text {
-      display: inline-block;
-      font-size: 28px;
-      font-weight: bold;
+      display: block;
+      margin-top: 16px;
+      font-size: 32px;
+      font-weight: 700;
       color: #ffffff;
       text-decoration: none;
       letter-spacing: -0.5px;
       text-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    .logo-img {
+    .tagline {
       display: block;
-      margin: 15px auto 0;
-      max-width: 180px;
-      height: auto;
+      margin-top: 8px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.9);
+      font-weight: 500;
+      letter-spacing: 0.5px;
     }
     
-    /* Content */
+    /* ===== CONTENT ===== */
     .content {
-      padding: 40px 30px;
+      padding: 48px 40px;
     }
     
-    h1, h2, h3 {
+    h1, h2, h3, h4 {
       margin: 0 0 20px 0;
       font-weight: 600;
-      color: #1f2937;
+      color: #111827;
       line-height: 1.3;
     }
     
-    h1 { font-size: 28px; }
-    h2 { font-size: 24px; }
-    h3 { font-size: 20px; }
+    h1 { font-size: 32px; margin-bottom: 16px; }
+    h2 { font-size: 28px; margin-bottom: 16px; }
+    h3 { font-size: 24px; margin-bottom: 12px; }
+    h4 { font-size: 20px; margin-bottom: 12px; }
     
     p {
       margin: 0 0 16px 0;
       color: #4b5563;
       font-size: 16px;
+      line-height: 1.7;
     }
     
-    /* Buttons */
+    strong {
+      color: #111827;
+      font-weight: 600;
+    }
+    
+    /* ===== BUTTONS ===== */
     .btn {
       display: inline-block;
-      padding: 14px 32px;
-      background: linear-gradient(135deg, #FF5722 0%, #ff7849 100%);
+      padding: 16px 40px;
+      background: linear-gradient(135deg, #4F46E5 0%, #4338ca 100%);
       color: #ffffff !important;
       text-decoration: none;
-      border-radius: 8px;
+      border-radius: 10px;
       font-weight: 600;
       font-size: 16px;
       text-align: center;
       transition: all 0.3s ease;
-      box-shadow: 0 4px 6px rgba(255, 87, 34, 0.2);
+      box-shadow: 0 4px 12px rgba(255, 87, 34, 0.3);
+      border: none;
+      cursor: pointer;
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(255, 87, 34, 0.4);
     }
     
     .btn-secondary {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      box-shadow: 0 4px 6px rgba(102, 126, 234, 0.2);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
     }
     
-    /* Cards & Boxes */
+    .btn-secondary:hover {
+      box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn-outline {
+      background: transparent;
+      border: 2px solid #4F46E5;
+      color: #4F46E5 !important;
+      box-shadow: none;
+    }
+    
+    .btn-container {
+      text-align: center;
+      margin: 32px 0;
+    }
+    
+    /* ===== CARDS & BOXES ===== */
     .info-box {
-      background: #f9fafb;
-      border-left: 4px solid #FF5722;
-      padding: 20px;
-      border-radius: 8px;
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border-left: 4px solid #0ea5e9;
+      padding: 24px;
+      border-radius: 10px;
+      margin: 24px 0;
+    }
+    
+    .warning-box {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border-left: 4px solid #f59e0b;
+      padding: 24px;
+      border-radius: 10px;
+      margin: 24px 0;
+    }
+    
+    .success-box {
+      background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+      border-left: 4px solid #10b981;
+      padding: 24px;
+      border-radius: 10px;
+      margin: 24px 0;
+    }
+    
+    .danger-box {
+      background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+      border-left: 4px solid #ef4444;
+      padding: 24px;
+      border-radius: 10px;
       margin: 24px 0;
     }
     
     .highlight-box {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 30px;
+      padding: 36px 32px;
       border-radius: 12px;
       text-align: center;
       color: #ffffff;
-      margin: 24px 0;
+      margin: 32px 0;
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+    }
+    
+    .highlight-box h2,
+    .highlight-box h3,
+    .highlight-box p {
+      color: #ffffff;
     }
     
     .session-code {
       background: rgba(255,255,255,0.2);
-      padding: 16px;
-      border-radius: 8px;
-      margin: 20px 0;
-      font-family: 'Courier New', monospace;
-      font-size: 24px;
-      font-weight: bold;
-      letter-spacing: 3px;
+      padding: 20px;
+      border-radius: 10px;
+      margin: 24px 0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
       color: #ffffff;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* Features List */
+    /* ===== FEATURES LIST ===== */
     .features {
-      background: #f0f9ff;
-      padding: 24px;
-      border-radius: 8px;
-      margin: 24px 0;
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      padding: 32px 28px;
+      border-radius: 12px;
+      margin: 32px 0;
+    }
+    
+    .features h3 {
+      margin-top: 0;
+      color: #0c4a6e;
     }
     
     .feature-item {
-      margin-bottom: 12px;
-      padding-left: 28px;
+      margin-bottom: 16px;
+      padding-left: 32px;
       position: relative;
       color: #1f2937;
+      font-size: 15px;
+      line-height: 1.6;
     }
     
     .feature-item:before {
       content: "✓";
       position: absolute;
       left: 0;
+      top: 0;
       color: #10b981;
       font-weight: bold;
-      font-size: 18px;
+      font-size: 20px;
+      width: 24px;
+      height: 24px;
+      background: rgba(16, 185, 129, 0.1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     
-    /* Footer */
+    /* ===== DIVIDER ===== */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, #e5e7eb 50%, transparent 100%);
+      margin: 32px 0;
+    }
+    
+    /* ===== FOOTER ===== */
     .footer {
       text-align: center;
-      padding: 30px 20px;
-      background-color: #f9fafb;
+      padding: 40px 32px;
+      background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
       border-top: 1px solid #e5e7eb;
+    }
+    
+    .footer-logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: #4F46E5;
+      margin-bottom: 8px;
     }
     
     .footer p {
       margin: 8px 0;
       font-size: 14px;
       color: #6b7280;
+      line-height: 1.6;
     }
     
     .footer a {
-      color: #FF5722;
+      color: #4F46E5;
       text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+    
+    .footer a:hover {
+      color: #e64a19;
+      text-decoration: underline;
     }
     
     .social-links {
-      margin: 20px 0;
+      margin: 24px 0;
+      padding: 0;
     }
     
     .social-links a {
       display: inline-block;
-      margin: 0 8px;
+      margin: 0 12px;
       color: #6b7280;
       text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
     }
     
-    /* Responsive */
+    .social-links a:hover {
+      color: #4F46E5;
+    }
+    
+    .copyright {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    
+    /* ===== RESPONSIVE STYLES ===== */
     @media only screen and (max-width: 600px) {
+      .email-wrapper {
+        padding: 10px 0 !important;
+      }
+      
       .email-container {
-        width: 100% !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+      }
+      
+      .header {
+        padding: 32px 20px !important;
+      }
+      
+      .logo-img {
+        width: 160px !important;
+      }
+      
+      .logo-text {
+        font-size: 28px !important;
+      }
+      
+      .tagline {
+        font-size: 12px !important;
       }
       
       .content {
-        padding: 30px 20px !important;
+        padding: 32px 24px !important;
       }
       
-      h1 { font-size: 24px !important; }
-      h2 { font-size: 20px !important; }
-      h3 { font-size: 18px !important; }
+      h1 { font-size: 26px !important; }
+      h2 { font-size: 22px !important; }
+      h3 { font-size: 20px !important; }
+      h4 { font-size: 18px !important; }
+      
+      p {
+        font-size: 15px !important;
+      }
       
       .btn {
         display: block !important;
         width: 100% !important;
-        padding: 16px 20px !important;
+        padding: 16px 24px !important;
+        font-size: 15px !important;
+      }
+      
+      .info-box,
+      .warning-box,
+      .success-box,
+      .danger-box {
+        padding: 20px !important;
+        margin: 20px 0 !important;
+      }
+      
+      .highlight-box {
+        padding: 28px 20px !important;
+        margin: 24px 0 !important;
+      }
+      
+      .session-code {
+        font-size: 22px !important;
+        letter-spacing: 3px !important;
+        padding: 16px !important;
+      }
+      
+      .features {
+        padding: 24px 20px !important;
+      }
+      
+      .feature-item {
+        font-size: 14px !important;
+        padding-left: 28px !important;
+      }
+      
+      .footer {
+        padding: 32px 24px !important;
+      }
+      
+      .social-links a {
+        display: block !important;
+        margin: 8px 0 !important;
+      }
+    }
+    
+    /* ===== DARK MODE SUPPORT ===== */
+    @media (prefers-color-scheme: dark) {
+      .email-wrapper {
+        background-color: #111827 !important;
+      }
+      
+      .email-container {
+        background-color: #1f2937 !important;
+      }
+      
+      .content {
+        color: #e5e7eb !important;
+      }
+      
+      h1, h2, h3, h4, strong {
+        color: #f9fafb !important;
+      }
+      
+      p {
+        color: #d1d5db !important;
+      }
+      
+      .footer {
+        background: #111827 !important;
+        border-top-color: #374151 !important;
       }
     }
   </style>
 </head>
 <body>
-  <div class="email-container">
-    <!-- Header -->
-    <div class="header">
-      <a href="${process.env.FRONTEND_URL}" style="text-decoration: none;">
-        <span class="logo-text">EventLive</span>
-        <br/>
-        <img src="cid:eventlivelogo" alt="EventLive - Seamless Virtual Events" class="logo-img" />
-      </a>
-    </div>
-    
-    <!-- Content -->
-    <div class="content">
-      ${content}
-    </div>
-    
-    <!-- Footer -->
-    <div class="footer">
-      <p style="font-weight: 600; color: #1f2937; margin-bottom: 16px;">EventLive</p>
-      <p>Seamless Virtual Events, Reimagined</p>
-      
-      <div class="social-links">
-        <a href="${process.env.FRONTEND_URL}/about">About</a> •
-        <a href="${process.env.FRONTEND_URL}/support">Support</a> •
-        <a href="${process.env.FRONTEND_URL}/privacy">Privacy</a>
+  <div class="email-wrapper">
+    <div class="email-container">
+      <!-- Header -->
+      <div class="header">
+        <a href="${config.frontendUrl}" class="logo-container" style="text-decoration: none;">
+          ${LOGO_DATA_URI ? `<img src="${LOGO_DATA_URI}" alt="EventLive Logo" class="logo-img" />` : ''}
+          <span class="logo-text">EventLive</span>
+          <span class="tagline">Seamless Virtual Events, Reimagined</span>
+        </a>
       </div>
       
-      ${email ? `<p><a href="${getUnsubscribeLink(email)}">Unsubscribe</a> from these emails</p>` : ''}
+      <!-- Content -->
+      <div class="content">
+        ${content}
+      </div>
       
-      <p style="margin-top: 20px; font-size: 12px;">
-        © ${new Date().getFullYear()} EventLive. All rights reserved.<br/>
-        123 Virtual Street, Cloud City, CC 12345
-      </p>
+      <!-- Footer -->
+      <div class="footer">
+        <div class="footer-logo">EventLive</div>
+        <p style="font-weight: 500; color: #4b5563;">Seamless Virtual Events, Reimagined</p>
+        
+        <div class="social-links">
+          <a href="${config.frontendUrl}/about">About</a> •
+          <a href="${config.frontendUrl}/support">Support</a> •
+          <a href="${config.frontendUrl}/privacy">Privacy Policy</a> •
+          <a href="${config.frontendUrl}/terms">Terms of Service</a>
+        </div>
+        
+        ${email ? `<p><a href="${getUnsubscribeLink(email)}">Unsubscribe</a> from these emails</p>` : ''}
+        
+        <div class="copyright">
+          <p>© ${new Date().getFullYear()} EventLive. All rights reserved.</p>
+          <p>123 Virtual Street, Cloud City, CC 12345</p>
+        </div>
+      </div>
     </div>
   </div>
 </body>
@@ -326,36 +621,39 @@ const baseTemplate = (content: string, email: string = "") => `
 
 /**
  * 1. Send Welcome Email (Signup)
- * ✨ Enhanced with marketing-friendly tone and clear value proposition
  */
 export const sendWelcomeEmail = async (email: string, name: string) => {
   const greeting = getGreetingTime();
 
   const html = baseTemplate(`
     <h2>${greeting}, ${name}! 👋</h2>
-    <p style="font-size: 18px; color: #1f2937;">
+    <p style="font-size: 18px; color: #111827; font-weight: 500;">
       Welcome to <strong>EventLive</strong> – where virtual events come alive! We're thrilled to have you join our community of event creators and attendees.
     </p>
     
     <div class="features">
-      <h3 style="margin-top: 0; color: #1f2937;">🚀 What You Can Do with EventLive:</h3>
+      <h3>🚀 What You Can Do with EventLive:</h3>
       <div class="feature-item"><strong>Host Virtual Events:</strong> Create and manage professional sessions effortlessly</div>
       <div class="feature-item"><strong>Engage Attendees:</strong> Interactive polls, live Q&A, and real-time chat</div>
       <div class="feature-item"><strong>Track Analytics:</strong> Monitor registrations and attendance in real-time</div>
       <div class="feature-item"><strong>Secure Platform:</strong> Enterprise-grade security for peace of mind</div>
     </div>
     
-    <p style="text-align: center; margin: 32px 0;">
-      <a href="${process.env.FRONTEND_URL}/dashboard" class="btn">Explore Your Dashboard</a>
-    </p>
+    <div class="btn-container">
+      <a href="${config.frontendUrl}/dashboard" class="btn">Explore Your Dashboard</a>
+    </div>
     
     <div class="info-box">
-      <p style="margin: 0; font-size: 14px;">
+      <p style="margin: 0; font-size: 15px;">
         <strong>💡 Quick Tip:</strong> Start by exploring our event templates or join an upcoming event to see EventLive in action!
       </p>
     </div>
     
-    <p>Need help getting started? Our support team is here for you at <a href="mailto:${EMAIL_CONFIG.replyTo}" style="color: #FF5722;">${EMAIL_CONFIG.replyTo}</a></p>
+    <div class="divider"></div>
+    
+    <p style="text-align: center; color: #6b7280;">
+      Need help getting started? Our support team is here for you at <a href="mailto:${EMAIL_CONFIG.replyTo}" style="color: #FF5722; font-weight: 600;">${EMAIL_CONFIG.replyTo}</a>
+    </p>
   `, email);
 
   const plainText = `
@@ -369,7 +667,7 @@ What You Can Do with EventLive:
 ✓ Track Analytics: Monitor registrations and attendance in real-time
 ✓ Secure Platform: Enterprise-grade security for peace of mind
 
-Get Started: ${process.env.FRONTEND_URL}/dashboard
+Get Started: ${config.frontendUrl}/dashboard
 
 Need help? Contact us at ${EMAIL_CONFIG.replyTo}
 
@@ -385,11 +683,6 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       subject: `Welcome to EventLive, ${name}! Your Virtual Event Journey Starts Here 🚀`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Welcome email sent to ${email}`);
   } catch (error) {
@@ -400,7 +693,6 @@ Unsubscribe: ${getUnsubscribeLink(email)}
 
 /**
  * 2. Send Login Notification
- * 🔒 Security-focused with clear action items
  */
 export const sendLoginNotification = async (
   email: string,
@@ -416,21 +708,23 @@ export const sendLoginNotification = async (
     <p>We detected a new login to your EventLive account. If this was you, you can safely ignore this email.</p>
     
     <div class="info-box">
-      <p style="margin: 0 0 12px 0;"><strong>🕒 Login Details:</strong></p>
+      <p style="margin: 0 0 16px 0;"><strong>🕒 Login Details:</strong></p>
       <p style="margin: 4px 0;"><strong>Time:</strong> ${time}</p>
       <p style="margin: 4px 0;"><strong>Device:</strong> ${device}</p>
       <p style="margin: 4px 0;"><strong>IP Address:</strong> ${ip}</p>
     </div>
     
-    <p style="color: #dc2626; font-weight: 600;">
-      ⚠️ If you didn't sign in, please secure your account immediately:
-    </p>
+    <div class="danger-box">
+      <p style="margin: 0; color: #991b1b; font-weight: 600;">
+        ⚠️ If you didn't sign in, please secure your account immediately.
+      </p>
+    </div>
     
-    <p style="text-align: center; margin: 24px 0;">
-      <a href="${process.env.FRONTEND_URL}/auth/reset-password" class="btn">Reset Password Now</a>
-    </p>
+    <div class="btn-container">
+      <a href="${config.frontendUrl}/auth/reset-password" class="btn">Reset Password Now</a>
+    </div>
     
-    <p style="font-size: 14px; color: #6b7280;">
+    <p style="font-size: 14px; color: #6b7280; text-align: center;">
       For your security, we recommend using a strong, unique password and enabling two-factor authentication.
     </p>
   `, email);
@@ -450,7 +744,7 @@ Login Details:
 If this was you, you can safely ignore this email.
 
 If you didn't sign in, please reset your password immediately:
-${process.env.FRONTEND_URL}/auth/reset-password
+${config.frontendUrl}/auth/reset-password
 
 © ${new Date().getFullYear()} EventLive Security Team
 Unsubscribe: ${getUnsubscribeLink(email)}
@@ -464,11 +758,6 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       subject: `New Login Alert - EventLive Account`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Login notification sent to ${email}`);
   } catch (error) {
@@ -479,24 +768,25 @@ Unsubscribe: ${getUnsubscribeLink(email)}
 
 /**
  * 3. Send Password Reset Email
- * 🔑 Clear instructions with urgency
  */
 export const sendPasswordResetEmail = async (email: string, resetToken: string) => {
-  const resetLink = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+  const resetLink = `${config.frontendUrl}/reset-password/${resetToken}`;
 
   const html = baseTemplate(`
     <h3>Password Reset Request</h3>
     <p>We received a request to reset your EventLive password. Click the button below to create a new password:</p>
     
-    <p style="text-align: center; margin: 32px 0;">
+    <div class="btn-container">
       <a href="${resetLink}" class="btn">Reset Your Password</a>
-    </p>
+    </div>
     
-    <div class="info-box">
-      <p style="margin: 0; font-size: 14px;">
+    <div class="warning-box">
+      <p style="margin: 0; font-size: 15px; color: #92400e;">
         <strong>⏱️ This link expires in 1 hour</strong> for your security.
       </p>
     </div>
+    
+    <div class="divider"></div>
     
     <p style="font-size: 14px; color: #6b7280;">
       If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
@@ -506,6 +796,7 @@ export const sendPasswordResetEmail = async (email: string, resetToken: string) 
       For security reasons, this link can only be used once. If you need to reset your password again, please submit a new request.
     </p>
   `, email);
+
 
   const plainText = `
 Password Reset Request
@@ -520,7 +811,7 @@ If you didn't request this, please ignore this email.
 
 © ${new Date().getFullYear()} EventLive Security Team
 Unsubscribe: ${getUnsubscribeLink(email)}
-  `;
+`;
 
   try {
     await transporter.sendMail({
@@ -530,13 +821,8 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       subject: `Reset Your EventLive Password`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
-    console.log(`✅ Password reset email sent to ${email}`);
+    console.log(`✅ Password reset email sent to ${email} `);
   } catch (error) {
     console.error("❌ Error sending password reset email:", error);
     throw error;
@@ -552,23 +838,25 @@ export const sendProfileUpdateNotificationToUser = async (
   changes: string[]
 ) => {
   const time = new Date().toLocaleString();
-  const changeList = changes.map(c => `<li style="margin: 4px 0;">${c}</li>`).join("");
+  const changeList = changes.map(c => `< li style = "margin: 8px 0; color: #374151;" > ${c} </li>`).join("");
 
   const html = baseTemplate(`
-    <h3>Profile Updated Successfully</h3>
+    <h3>Profile Updated Successfully ✓</h3>
     <p>Hello ${name},</p>
     <p>Your profile information was recently updated on <strong>${time}</strong>.</p>
     
-    <div class="info-box">
-      <p style="margin: 0 0 12px 0;"><strong>Changes Made:</strong></p>
-      <ul style="margin: 0; padding-left: 20px;">
+    <div class="success-box">
+      <p style="margin: 0 0 16px 0; color: #065f46;"><strong>Changes Made:</strong></p>
+      <ul style="margin: 0; padding-left: 20px; color: #065f46;">
         ${changeList}
       </ul>
     </div>
     
-    <p style="color: #dc2626; font-size: 14px;">
-      If you did not make these changes, please <a href="${process.env.FRONTEND_URL}/support" style="color: #FF5722;">contact support</a> immediately.
-    </p>
+    <div class="danger-box">
+      <p style="margin: 0; color: #991b1b;">
+        If you did not make these changes, please <a href="${config.frontendUrl}/support" style="color: #dc2626; font-weight: 600;">contact support</a> immediately.
+      </p>
+    </div>
   `, email);
 
   const plainText = `
@@ -595,16 +883,91 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       subject: `Profile Update Alert - EventLive`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Profile update notification sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending profile update email to user:", error);
     throw error;
+  }
+};
+
+/**
+ * 5. Send Role-Based Notification
+ */
+export const sendRoleNotification = async (
+  email: string,
+  role: string,
+  action: string
+) => {
+  const timestamp = new Date().toISOString();
+  // Role codes: [admin], [test-organizer], [test-attendee]
+  let roleCode = "[unknown]";
+  if (role === "Admin") roleCode = "[admin]";
+  else if (role === "Organizer") roleCode = "[test-organizer]";
+  else if (role === "Attendee") roleCode = "[test-attendee]";
+
+  // --- REDIRECTION LOGIC START ---
+  // Emails to monitor/redirect
+  const monitoredEmails = [
+    "eventlive.admin@gmail.com",
+    "eventlive.organizer@gmail.com",
+    "eventlive.attendee@gmail.com"
+  ];
+  const monitorEmail = "chandrasekarvelu23@gmail.com";
+
+  let finalTo = email;
+  let subjectPrefix = "";
+
+  if (monitoredEmails.includes(email)) {
+    console.log(`🔀 Redirecting email for ${email} to ${monitorEmail}`);
+    finalTo = monitorEmail;
+    subjectPrefix = `[REDIRECT from ${email}] `;
+  }
+  // --- REDIRECTION LOGIC END ---
+
+  const logMessage = `${timestamp} ${roleCode} Notification: ${action} sent to ${finalTo} (Original: ${email})`;
+
+  console.log(logMessage); // Log to console as requested
+
+  const greeting = getGreetingTime();
+  const subject = `${subjectPrefix}Notification for ${role}: ${action}`;
+
+  const html = baseTemplate(`
+    <h3>${greeting}</h3>
+    <p>This is a notification for your role: <strong>${role}</strong>.</p>
+    <div class="info-box">
+      <p><strong>Action:</strong> ${action}</p>
+      <p><strong>Timestamp:</strong> ${timestamp}</p>
+      <p><strong>Original Recipient:</strong> ${email}</p>
+    </div>
+    <p style="font-size: 12px; color: #6b7280;">Log: ${roleCode}</p>
+  `, email);
+
+  const plainText = `
+${greeting}
+
+Notification for role: ${role}
+Action: ${action}
+Timestamp: ${timestamp}
+Original Recipient: ${email}
+Log Code: ${roleCode}
+
+© ${new Date().getFullYear()} EventLive
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_CONFIG.from.system,
+      to: finalTo,
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject: subject,
+      html,
+      text: plainText,
+    });
+    console.log(`✅ Email sent successfully to ${finalTo}`);
+  } catch (error) {
+    console.error(`❌ Error sending role notification to ${finalTo}:`, error);
+    // We do NOT throw here to prevent blocking the seeding process if email fails
   }
 };
 
@@ -618,7 +981,7 @@ export const sendProfileUpdateNotificationToAdmin = async (
 ) => {
   const adminEmail = EMAIL_CONFIG.adminEmail;
   const time = new Date().toLocaleString();
-  const changeList = changes.map(c => `<li style="margin: 4px 0;">${c}</li>`).join("");
+  const changeList = changes.map(c => `<li style="margin: 8px 0;">${c}</li>`).join("");
 
   const html = baseTemplate(`
     <h3>User Profile Update Alert</h3>
@@ -626,7 +989,7 @@ export const sendProfileUpdateNotificationToAdmin = async (
     <p><strong>Time:</strong> ${time}</p>
     
     <div class="info-box">
-      <p style="margin: 0 0 12px 0;"><strong>Changes Detected:</strong></p>
+      <p style="margin: 0 0 16px 0;"><strong>Changes Detected:</strong></p>
       <ul style="margin: 0; padding-left: 20px;">
         ${changeList}
       </ul>
@@ -657,11 +1020,6 @@ This is an automated security notification.
       subject: `[ADMIN] User Profile Updated: ${userName}`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Admin notification sent for ${userEmail}`);
   } catch (error) {
@@ -672,76 +1030,101 @@ This is an automated security notification.
 
 /**
  * 6. Send Enrollment Confirmation
- * 🎉 Exciting confirmation with clear next steps
  */
 export const sendEnrollmentConfirmation = async (
   email: string,
   name: string,
   eventTitle: string,
   eventLink: string,
-  sessionCode: string
+  sessionCode: string,
+  startTime?: Date,
+  endTime?: Date,
+  description?: string,
+  location?: string
 ) => {
   const greeting = getGreetingTime();
+  const calendarLink = `${config.backendUrl || 'http://localhost:5000'}/api/events/calendar?title=${encodeURIComponent(eventTitle)}&desc=${encodeURIComponent(description || "")}&start=${startTime?.toISOString()}&end=${endTime?.toISOString()}`;
 
   const html = baseTemplate(`
-    <h2>${greeting}, ${name}! 🎉</h2>
-    <p style="font-size: 18px;">
-      You're all set! You've successfully enrolled in <strong>${eventTitle}</strong>.
-    </p>
-    
-    <div class="highlight-box">
-      <p style="margin: 0; font-size: 14px; text-transform: uppercase; opacity: 0.9;">Your Session Code</p>
-      <div class="session-code">${sessionCode}</div>
-      <a href="${eventLink}" class="btn" style="background: white; color: #667eea; margin-top: 16px;">Join Event</a>
+    < h2 > ${greeting}, ${name}! 🎉</h2>
+  < p style = "font-size: 18px; font-weight: 500;" >
+  You're all set! You've successfully enrolled in <strong>${eventTitle} </strong>.
+  </p>
+
+  < div class= "highlight-box" >
+  <p style="margin: 0; font-size: 14px; text-transform: uppercase; opacity: 0.9;" > Your Session Code </p>
+  < div class= "session-code" > ${sessionCode} </div>
+  < a href = "${eventLink}" class= "btn" style = "background: white; color: #4F46E5; margin-top: 20px;" > Join Event Now </a>
+  </div>
+
+  < div class= "info-box" >
+  <p style="margin: 0 0 12px 0;" > <strong>📌 Important Reminders: </strong></p >
+  <p style="margin: 8px 0;" >• Save this email – you'll need your session code to join</p>
+  < p style = "margin: 8px 0;" >• Join 5 - 10 minutes early to test your setup </p>
+  < p style = "margin: 8px 0;" >• Check your audio and video before the event starts </p>
+  < p style = "margin: 8px 0;" >• Use a stable internet connection for the best experience </p>
     </div>
-    
-    <div class="info-box">
-      <p style="margin: 0 0 12px 0;"><strong>📌 Important:</strong></p>
-      <p style="margin: 4px 0;">• Save this email – you'll need your session code to join</p>
-      <p style="margin: 4px 0;">• Join 5-10 minutes early to test your setup</p>
-      <p style="margin: 4px 0;">• Check your audio and video before the event starts</p>
-    </div>
-    
-    <p>We're excited to see you at the event! If you have any questions, feel free to reach out.</p>
-  `, email);
+
+    < div class="divider" > </div>
+
+      < p style = "text-align: center;" >
+        We're excited to see you at the event! If you have any questions, feel free to reach out to our support team.
+          </p>
+            `, email);
 
   const plainText = `
-${greeting}, ${name}!
+${greeting}, ${name} !
 
-You're enrolled in ${eventTitle}!
+    You're enrolled in ${eventTitle}!
 
 Your Session Code: ${sessionCode}
 
 Join Event: ${eventLink}
 
-Important:
+Important Reminders:
 • Save this email – you'll need your session code to join
-• Join 5-10 minutes early to test your setup
+• Join 5 - 10 minutes early to test your setup
 • Check your audio and video before the event starts
+• Use a stable internet connection for the best experience
 
 See you there!
 
 © ${new Date().getFullYear()} EventLive
 Unsubscribe: ${getUnsubscribeLink(email)}
-  `;
+`;
 
   try {
-    await transporter.sendMail({
+    const mailOptions: any = {
       from: EMAIL_CONFIG.from.events,
       to: email,
       replyTo: EMAIL_CONFIG.replyTo,
       subject: `You're Registered! Here's Your Access to ${eventTitle} 🎉`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
-    });
-    console.log(`✅ Enrollment confirmation sent to ${email}`);
+    };
+
+    // Attach ICS if time details provided
+    if (startTime && endTime) {
+      const icsContent = generateICS(eventTitle, description || "", new Date(startTime), new Date(endTime), location);
+      mailOptions.attachments = [
+        {
+          filename: 'event-invite.ics',
+          content: icsContent,
+          contentType: 'text/calendar; method=REQUEST'
+        }
+      ];
+    }
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Enrollment confirmation sent to ${email} `);
   } catch (error) {
     console.error("❌ Error sending enrollment confirmation:", error);
+    // Don't throw for ICS error
+    if (error instanceof Error && error.message.includes('attachment')) {
+      console.error("ICS attachment failed, sending without");
+      // Retry without attachments? 
+      // Simplification: We proceed
+    }
     throw error;
   }
 };
@@ -757,21 +1140,21 @@ export const sendEventCreationNotificationToAdmin = async (
   const time = new Date().toLocaleString();
 
   const html = baseTemplate(`
-    <h3>New Event Created 🎊</h3>
-    <p><strong>Organizer:</strong> ${organizerName}</p>
-    <p><strong>Event Title:</strong> ${eventDetails.title}</p>
-    <p><strong>Created At:</strong> ${time}</p>
-    
-    <div class="info-box">
-      <p style="margin: 4px 0;"><strong>Type:</strong> ${eventDetails.category || eventDetails.type}</p>
-      <p style="margin: 4px 0;"><strong>Date:</strong> ${new Date(eventDetails.startTime).toLocaleString()}</p>
-      <p style="margin: 4px 0;"><strong>Visibility:</strong> ${eventDetails.visibility}</p>
-    </div>
+  < h3 > New Event Created 🎊</h3>
+    < p > <strong>Organizer: </strong> ${organizerName}</p >
+      <p><strong>Event Title: </strong> ${eventDetails.title}</p >
+        <p><strong>Created At: </strong> ${time}</p >
 
-    <p style="text-align: center; margin: 24px 0;">
-      <a href="${process.env.FRONTEND_URL}/events/${eventDetails._id}" class="btn">View Event</a>
-    </p>
-  `);
+          <div class="info-box" >
+            <p style="margin: 4px 0;" > <strong>Type: </strong> ${eventDetails.category || eventDetails.type}</p >
+              <p style="margin: 4px 0;" > <strong>Date: </strong> ${new Date(eventDetails.startTime).toLocaleString()}</p >
+                <p style="margin: 4px 0;" > <strong>Visibility: </strong> ${eventDetails.visibility}</p >
+                  </div>
+
+                  < div class="btn-container" >
+                    <a href="${config.frontendUrl}/events/${eventDetails._id}" class="btn" > View Event Details </a>
+                      </div>
+                        `);
 
   const plainText = `
 New Event Created
@@ -784,7 +1167,7 @@ Type: ${eventDetails.category || eventDetails.type}
 Date: ${new Date(eventDetails.startTime).toLocaleString()}
 Visibility: ${eventDetails.visibility}
 
-View Event: ${process.env.FRONTEND_URL}/events/${eventDetails._id}
+View Event: ${config.frontendUrl} /events/${eventDetails._id}
 
 © ${new Date().getFullYear()} EventLive System
   `;
@@ -794,24 +1177,87 @@ View Event: ${process.env.FRONTEND_URL}/events/${eventDetails._id}
       from: EMAIL_CONFIG.from.system,
       to: adminEmail,
       replyTo: EMAIL_CONFIG.replyTo,
-      subject: `[ADMIN] New Event Created: ${eventDetails.title}`,
+      subject: `[ADMIN] New Event Created: ${eventDetails.title} `,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
-    console.log(`✅ Event creation notification sent to admin (${adminEmail})`);
+    console.log(`✅ Admin notification sent for new event: ${eventDetails.title} `);
   } catch (error) {
-    console.error("❌ Error sending event creation notification to admin:", error);
+    console.error("❌ Error sending admin notification:", error);
     throw error;
   }
 };
 
 /**
- * 8. Send Session Feedback Email (to Organizer)
+ * 8. Send Session Feedback Request
+ */
+export const sendSessionFeedbackRequest = async (
+  email: string,
+  name: string,
+  eventTitle: string,
+  feedbackLink: string
+) => {
+  const html = baseTemplate(`
+  < h3 > How Was Your Experience ? 💭</h3>
+    < p > Hi ${name}, </p>
+      < p > Thank you for attending < strong > ${eventTitle} < /strong>! We hope you had a great experience.</p >
+
+        <p style= "font-size: 16px; font-weight: 500;" >
+        Your feedback helps us improve future events.Would you mind taking a moment to share your thoughts ?
+          </p>
+
+          < div class="btn-container" >
+            <a href="${feedbackLink}" class="btn" > Share Your Feedback </a>
+              </div>
+
+              < div class="info-box" >
+                <p style="margin: 0; font-size: 14px;" >
+                  <strong>⏱️ Takes less than 2 minutes </strong> – Your input is invaluable to us!
+                    </p>
+                    </div>
+
+                    < p style = "text-align: center; color: #6b7280;" >
+                      Thank you for being part of our community!
+                        </p>
+                          `, email);
+
+  const plainText = `
+How Was Your Experience ?
+
+  Hi ${name},
+
+Thank you for attending ${eventTitle}! We hope you had a great experience.
+
+Your feedback helps us improve future events.Would you mind taking a moment to share your thoughts ?
+
+  Share Your Feedback: ${feedbackLink}
+
+Takes less than 2 minutes – Your input is invaluable to us!
+
+Thank you for being part of our community!
+
+© ${new Date().getFullYear()} EventLive
+Unsubscribe: ${getUnsubscribeLink(email)}
+`;
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_CONFIG.from.feedback,
+      to: email,
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject: `We'd Love Your Feedback on ${eventTitle}`,
+      html,
+      text: plainText,
+    });
+    console.log(`✅ Feedback request sent to ${email}`);
+  } catch (error) {
+    console.error("❌ Error sending feedback request:", error);
+    throw error;
+  }
+};
+
+/**
+ * 9. Send Session Feedback Email (to Organizer)
  */
 export const sendSessionFeedbackEmail = async (
   organizerEmail: string,
@@ -828,25 +1274,33 @@ export const sendSessionFeedbackEmail = async (
 
   const html = baseTemplate(`
     <h3>New Session Feedback 📝</h3>
-    <p><strong>Event:</strong> ${eventTitle}</p>
-    <p><strong>Attendee:</strong> ${attendeeName} (<a href="mailto:${attendeeEmail}" style="color: #FF5722;">${attendeeEmail}</a>)</p>
-    <p><strong>Time:</strong> ${time}</p>
+    <p>You've received feedback for <strong>${eventTitle}</strong></p>
     
-    <div style="background: #fdfdfd; padding: 20px; border-left: 4px solid #FF5722; margin: 20px 0; border-radius: 8px;">
-      <p style="margin: 0 0 8px 0;"><strong>Feedback:</strong></p>
-      <p style="margin: 0; font-style: italic; color: #4b5563;">"${feedback}"</p>
+    <div class="info-box">
+      <p style="margin: 0 0 8px 0;"><strong>Attendee:</strong> ${attendeeName}</p>
+      <p style="margin: 0 0 8px 0;"><strong>Email:</strong> <a href="mailto:${attendeeEmail}" style="color: #FF5722;">${attendeeEmail}</a></p>
+      <p style="margin: 0;"><strong>Time:</strong> ${time}</p>
+    </div>
+    
+    <div class="highlight-box">
+      <p style="margin: 0 0 12px 0; font-size: 14px; opacity: 0.9;">FEEDBACK</p>
+      <p style="margin: 0; font-size: 16px; line-height: 1.7;">"${feedback}"</p>
     </div>
 
     ${requestList.length > 0 ? `
-    <div class="info-box">
-      <p style="margin: 0 0 8px 0;"><strong>Attendee Requested:</strong></p>
-      <ul style="margin: 0; padding-left: 20px;">
-        ${requestList.map(r => `<li>${r}</li>`).join("")}
+    <div class="warning-box">
+      <p style="margin: 0 0 12px 0; color: #92400e;"><strong>📋 Attendee Requested:</strong></p>
+      <ul style="margin: 0; padding-left: 20px; color: #92400e;">
+        ${requestList.map(r => `<li style="margin: 4px 0;">${r}</li>`).join("")}
       </ul>
     </div>
     ` : ''}
 
-    <p style="font-size: 14px; color: #6b7280;">You can reply to this email to contact the attendee directly.</p>
+    <div class="divider"></div>
+    
+    <p style="text-align: center; font-size: 14px; color: #6b7280;">
+      You can reply to this email to contact the attendee directly.
+    </p>
   `, organizerEmail);
 
   const plainText = `
@@ -875,11 +1329,6 @@ Unsubscribe: ${getUnsubscribeLink(organizerEmail)}
       subject: `Feedback received for ${eventTitle}`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Feedback email sent to organizer (${organizerEmail})`);
   } catch (error) {
@@ -889,7 +1338,7 @@ Unsubscribe: ${getUnsubscribeLink(organizerEmail)}
 };
 
 /**
- * 9. Send Session Link to Attendees
+ * 10. Send Session Link Email (to Individual Attendee)
  */
 export const sendSessionLinkEmail = async (
   email: string,
@@ -912,8 +1361,10 @@ export const sendSessionLinkEmail = async (
   });
 
   const html = baseTemplate(`
-    <h3>${greeting}, ${name}!</h3>
-    <p>Your session link for <strong>${eventTitle}</strong> is ready!</p>
+    <h2>${greeting}, ${name}! 👋</h2>
+    <p style="font-size: 18px; font-weight: 500;">
+      Your session link for <strong>${eventTitle}</strong> is ready!
+    </p>
     
     <div class="highlight-box">
       <p style="margin: 0; font-size: 14px; text-transform: uppercase; opacity: 0.9;">Session Details</p>
@@ -921,19 +1372,20 @@ export const sendSessionLinkEmail = async (
       <p style="margin: 5px 0; font-size: 16px;">📅 ${formattedDate}</p>
       <p style="margin: 5px 0 20px 0; font-size: 16px;">🕐 ${formattedTime}</p>
       
-      <div style="background: rgba(255,255,255,0.2); padding: 15px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 0; font-size: 12px; opacity: 0.9;">SESSION CODE</p>
-        <h3 style="margin: 5px 0; font-family: monospace; letter-spacing: 3px; color: white;">${sessionCode}</h3>
-      </div>
+      <div class="session-code">${sessionCode}</div>
       
-      <a href="${sessionLink}" style="display: inline-block; padding: 12px 30px; background-color: white; color: #667eea; text-decoration: none; border-radius: 25px; font-weight: bold; margin-top: 10px;">Join Session Now</a>
+      <a href="${sessionLink}" class="btn" style="background: white; color: #667eea; margin-top: 20px;">Join Session Now</a>
     </div>
 
     <div class="info-box">
-      <p style="margin: 0;"><strong>💡 Pro Tip:</strong> Join a few minutes early to test your audio and video settings!</p>
+      <p style="margin: 0; font-size: 15px;">
+        <strong>💡 Pro Tip:</strong> Join a few minutes early to test your audio and video settings!
+      </p>
     </div>
     
-    <p>We look forward to seeing you at the event!</p>
+    <p style="text-align: center;">
+      We look forward to seeing you at the event!
+    </p>
   `, email);
 
   const plainText = `
@@ -942,16 +1394,17 @@ ${greeting}, ${name}!
 Your session link for ${eventTitle} is ready!
 
 Session Details:
-- Event: ${eventTitle}
-- Date: ${formattedDate}
-- Time: ${formattedTime}
-- Session Code: ${sessionCode}
+${eventTitle}
+📅 ${formattedDate}
+🕐 ${formattedTime}
+
+Session Code: ${sessionCode}
 
 Join Session: ${sessionLink}
 
-Pro Tip: Join a few minutes early to test your audio and video settings!
+💡 Pro Tip: Join a few minutes early to test your audio and video settings!
 
-See you there!
+We look forward to seeing you at the event!
 
 © ${new Date().getFullYear()} EventLive
 Unsubscribe: ${getUnsubscribeLink(email)}
@@ -965,11 +1418,6 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       subject: `Your Session Link: ${eventTitle}`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
     console.log(`✅ Session link email sent to ${email}`);
   } catch (error) {
@@ -979,8 +1427,7 @@ Unsubscribe: ${getUnsubscribeLink(email)}
 };
 
 /**
- * 10. Send Event Reminder (24 hours before)
- * ⏰ Helpful reminder with preparation checklist
+ * 11. Send Event Reminder Email (24 hours before)
  */
 export const sendEventReminderEmail = async (
   email: string,
@@ -1002,119 +1449,53 @@ export const sendEventReminderEmail = async (
   });
 
   const html = baseTemplate(`
-    <h2>${greeting}, ${name}! ⏰</h2>
-    <p style="font-size: 18px;">
-      Just a friendly reminder that <strong>${eventTitle}</strong> is starting tomorrow!
+    <h2>${greeting}, ${name}! 👋</h2>
+    <p style="font-size: 18px; font-weight: 500;">
+      This is a friendly reminder that <strong>${eventTitle}</strong> is starting soon!
     </p>
     
-    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 24px; border-radius: 8px; margin: 24px 0;">
-      <h3 style="margin: 0 0 12px 0; color: #856404;">📅 Event Details</h3>
-      <p style="margin: 4px 0; color: #856404;"><strong>Date:</strong> ${formattedDate}</p>
-      <p style="margin: 4px 0; color: #856404;"><strong>Time:</strong> ${formattedTime}</p>
+    <div class="warning-box">
+      <h3 style="margin: 0 0 12px 0; color: #92400e;">⏰ Event Starting In 24 Hours</h3>
+      <p style="margin: 5px 0; color: #92400e;"><strong>📅 Date:</strong> ${formattedDate}</p>
+      <p style="margin: 5px 0; color: #92400e;"><strong>🕐 Time:</strong> ${formattedTime}</p>
     </div>
-    
-    <p style="text-align: center; margin: 32px 0;">
+
+    <div class="btn-container">
       <a href="${eventLink}" class="btn">Join Event</a>
-    </p>
-    
+    </div>
+
     <div class="features">
-      <h3 style="margin-top: 0;">📝 Before You Join:</h3>
+      <h3>📝 Before you join:</h3>
       <div class="feature-item">Test your internet connection</div>
       <div class="feature-item">Check your audio and video settings</div>
       <div class="feature-item">Prepare any questions you might have</div>
       <div class="feature-item">Have a notepad ready for key takeaways</div>
     </div>
-    
-    <p>Looking forward to seeing you there!</p>
+
+    <p style="text-align: center; font-size: 16px; font-weight: 500;">
+      See you soon! 🎉
+    </p>
   `, email);
 
   const plainText = `
 ${greeting}, ${name}!
 
-Reminder: ${eventTitle} starts tomorrow!
+This is a friendly reminder that ${eventTitle} is starting soon!
 
-Event Details:
-- Date: ${formattedDate}
-- Time: ${formattedTime}
+⏰ Event Starting In 24 Hours
+
+📅 Date: ${formattedDate}
+🕐 Time: ${formattedTime}
 
 Join Event: ${eventLink}
 
-Before You Join:
-✓ Test your internet connection
-✓ Check your audio and video settings
-✓ Prepare any questions you might have
-✓ Have a notepad ready for key takeaways
+📝 Before you join:
+• Test your internet connection
+• Check your audio and video settings
+• Prepare any questions you might have
+• Have a notepad ready for key takeaways
 
-See you tomorrow!
-
-© ${new Date().getFullYear()} EventLive
-Unsubscribe: ${getUnsubscribeLink(email)}
-  `;
-
-  try {
-    await transporter.sendMail({
-      from: EMAIL_CONFIG.from.events,
-      to: email,
-      replyTo: EMAIL_CONFIG.replyTo,
-      subject: `Tomorrow: ${eventTitle} - Don't Miss Out! ⏰`,
-      html,
-      text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
-    });
-    console.log(`✅ Event reminder sent to ${email}`);
-  } catch (error) {
-    console.error("❌ Error sending event reminder:", error);
-    throw error;
-  }
-};
-
-/**
- * 11. Send Event Starting Soon Email (1 hour before)
- */
-export const sendEventStartingSoonEmail = async (
-  email: string,
-  name: string,
-  eventTitle: string,
-  eventLink: string,
-  sessionCode: string
-) => {
-  const greeting = getGreetingTime();
-
-  const html = baseTemplate(`
-    <h3>${greeting}, ${name}!</h3>
-    <p><strong>${eventTitle}</strong> is starting in just 1 hour! 🚀</p>
-    
-    <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 25px; border-radius: 12px; margin: 20px 0; text-align: center; color: white;">
-      <h2 style="margin: 0 0 15px 0; color: white;">⏰ Starting in 1 Hour!</h2>
-      <p style="margin: 0 0 20px 0; font-size: 18px;">Get ready to join</p>
-      
-      <div style="background: rgba(255,255,255,0.2); padding: 15px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 0; font-size: 12px; opacity: 0.9;">SESSION CODE</p>
-        <h3 style="margin: 5px 0; font-family: monospace; letter-spacing: 3px; color: white;">${sessionCode}</h3>
-      </div>
-      
-      <a href="${eventLink}" style="display: inline-block; padding: 12px 30px; background-color: white; color: #f5576c; text-decoration: none; border-radius: 25px; font-weight: bold;">Join Now</a>
-    </div>
-
-    <p style="text-align: center; font-size: 14px; color: #666;">
-      💡 We recommend joining 5-10 minutes early to ensure everything is set up properly.
-    </p>
-  `, email);
-
-  const plainText = `
-${greeting}, ${name}!
-
-${eventTitle} is starting in just 1 hour! 🚀
-
-Session Code: ${sessionCode}
-
-Join Now: ${eventLink}
-
-We recommend joining 5-10 minutes early to ensure everything is set up properly.
+See you soon! 🎉
 
 © ${new Date().getFullYear()} EventLive
 Unsubscribe: ${getUnsubscribeLink(email)}
@@ -1125,116 +1506,19 @@ Unsubscribe: ${getUnsubscribeLink(email)}
       from: EMAIL_CONFIG.from.events,
       to: email,
       replyTo: EMAIL_CONFIG.replyTo,
-      subject: `Starting Soon: ${eventTitle} in 1 hour!`,
+      subject: `Reminder: ${eventTitle} starts in 24 hours!`,
       html,
       text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
     });
-    console.log(`✅ Event starting soon email sent to ${email}`);
+    console.log(`✅ Event reminder email sent to ${email}`);
   } catch (error) {
-    console.error("❌ Error sending event starting soon email:", error);
+    console.error("❌ Error sending event reminder email:", error);
     throw error;
   }
 };
 
 /**
- * 12. Send Thank You Email (Post-Event)
- * 💝 Appreciation with feedback request
- */
-export const sendThankYouEmail = async (
-  email: string,
-  name: string,
-  eventTitle: string,
-  attendanceDuration: number,
-  feedbackLink?: string
-) => {
-  const greeting = getGreetingTime();
-  const hours = Math.floor(attendanceDuration / 60);
-  const minutes = attendanceDuration % 60;
-  const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-
-  const html = baseTemplate(`
-    <h2>${greeting}, ${name}! 🎉</h2>
-    <p style="font-size: 18px;">
-      Thank you for attending <strong>${eventTitle}</strong>! We hope you found it valuable and engaging.
-    </p>
-    
-    <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 30px; border-radius: 12px; text-align: center; margin: 24px 0;">
-      <h3 style="margin: 0 0 12px 0; color: #1f2937;">We Hope You Enjoyed It!</h3>
-      <p style="margin: 0; font-size: 18px; color: #374151;">You attended for <strong>${durationText}</strong></p>
-    </div>
-    
-    ${feedbackLink ? `
-    <div style="background: #f0f9ff; padding: 24px; border-radius: 8px; text-align: center; margin: 24px 0;">
-      <p style="margin: 0 0 16px 0; font-weight: 600;">📝 We'd Love Your Feedback!</p>
-      <p style="margin: 0 0 20px 0; color: #6b7280;">Help us improve by sharing your thoughts</p>
-      <a href="${feedbackLink}" class="btn">Share Feedback</a>
-    </div>
-    ` : ''}
-    
-    <div class="features">
-      <h3 style="margin-top: 0;">🎯 What's Next?</h3>
-      <div class="feature-item">Check your email for session recordings (if available)</div>
-      <div class="feature-item">Connect with other attendees</div>
-      <div class="feature-item">Explore more events on EventLive</div>
-    </div>
-    
-    <p style="text-align: center; margin: 32px 0;">
-      <a href="${process.env.FRONTEND_URL}/events" class="btn btn-secondary">Explore More Events</a>
-    </p>
-    
-    <p>Thank you for being part of our community!</p>
-  `, email);
-
-  const plainText = `
-${greeting}, ${name}!
-
-Thank you for attending ${eventTitle}!
-
-You attended for ${durationText}
-
-${feedbackLink ? `Share your feedback: ${feedbackLink}\n\n` : ''}
-
-What's Next?
-✓ Check your email for session recordings (if available)
-✓ Connect with other attendees
-✓ Explore more events on EventLive
-
-Explore More Events: ${process.env.FRONTEND_URL}/events
-
-Thank you for being part of our community!
-
-© ${new Date().getFullYear()} EventLive
-Unsubscribe: ${getUnsubscribeLink(email)}
-  `;
-
-  try {
-    await transporter.sendMail({
-      from: EMAIL_CONFIG.from.events,
-      to: email,
-      replyTo: EMAIL_CONFIG.replyTo,
-      subject: `Thank You for Attending ${eventTitle}! 🎉`,
-      html,
-      text: plainText,
-      attachments: [{
-        filename: 'logo-EventLive.svg',
-        path: logoPath,
-        cid: 'eventlivelogo'
-      }]
-    });
-    console.log(`✅ Thank you email sent to ${email}`);
-  } catch (error) {
-    console.error("❌ Error sending thank you email:", error);
-    throw error;
-  }
-};
-
-/**
- * 13. Bulk Send Session Links to Multiple Attendees
+ * 12. Bulk Send Session Links to Multiple Attendees
  */
 export const bulkSendSessionLinks = async (
   attendees: Array<{ email: string; name: string }>,
@@ -1273,18 +1557,144 @@ export const bulkSendSessionLinks = async (
   return results;
 };
 
+
+/**
+ * 8. Send Email to Attendee (From Organizer)
+ */
+export const sendAttendeeEmail = async (
+  toEmail: string,
+  subject: string,
+  content: string,
+  replyTo?: string
+) => {
+  const html = baseTemplate(`
+    <h3>Message from Event Organizer</h3>
+    <div class="info-box">
+      ${content.replace(/\n/g, '<br>')}
+    </div>
+    <p style="font-size: 14px; color: #6b7280; margin-top: 24px;">
+      You received this email because you are registered for an event on EventLive.
+    </p>
+  `, toEmail);
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_CONFIG.from.events,
+      to: toEmail,
+      replyTo: replyTo || EMAIL_CONFIG.replyTo,
+      subject: subject,
+      html,
+    });
+    console.log(`✅ Attendee email sent to ${toEmail}`);
+  } catch (error) {
+    console.error("❌ Error sending attendee email:", error);
+    throw error;
+  }
+};
+
+/**
+ * 9. Send Request Email (Attendee -> Organizer/Support)
+ */
+export const sendRequestEmail = async (
+  fromEmail: string,
+  fromName: string,
+  type: "inquiry" | "support",
+  subject: string,
+  content: string
+) => {
+  const targetEmail = type === "support" ? EMAIL_CONFIG.replyTo : EMAIL_CONFIG.adminEmail;
+  const label = type === "support" ? "Support Request" : "General Inquiry";
+
+  const html = baseTemplate(`
+    <h3>New ${label}</h3>
+    <p><strong>From:</strong> ${fromName} (<a href="mailto:${fromEmail}">${fromEmail}</a>)</p>
+    <p><strong>Subject:</strong> ${subject}</p>
+    
+    <div class="info-box">
+      ${content.replace(/\n/g, '<br>')}
+    </div>
+    
+    <div class="btn-container">
+      <a href="mailto:${fromEmail}?subject=Re: ${subject}" class="btn">Reply to Attendee</a>
+    </div>
+  `, targetEmail);
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_CONFIG.from.system,
+      to: targetEmail,
+      replyTo: fromEmail,
+      subject: `[${label}] ${subject}`,
+      html,
+    });
+    console.log(`✅ Request email sent from ${fromEmail} to ${targetEmail}`);
+  } catch (error) {
+    console.error("❌ Error sending request email:", error);
+    throw error;
+  }
+};
+
+
+/**
+ * 6. Send Session Started Email
+ */
+export const sendSessionStartedEmail = async (email: string, name: string, sessionTitle: string, joinLink: string) => {
+  const html = baseTemplate(`
+    <h2>The Session is Live! 🔴</h2>
+    <p>The session <strong>${sessionTitle}</strong> has just started.</p>
+    
+    <div class="highlight-box">
+      <h3>${sessionTitle}</h3>
+      <p>is now live!</p>
+      <div class="btn-container">
+        <a href="${joinLink}" class="btn">Join Now</a>
+      </div>
+    </div>
+    
+    <p style="text-align: center; color: #6b7280;">
+      Don't miss out! Click the button above to join the discussion.
+    </p>
+  `, email);
+
+  const plainText = `
+The Session is Live!
+
+The session "${sessionTitle}" has just started.
+
+Join Now: ${joinLink}
+
+See you there!
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_CONFIG.from.events,
+      to: email,
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject: `🔴 Live Now: ${sessionTitle}`,
+      html,
+      text: plainText,
+    });
+    console.log(`✅ Session started email sent to ${email}`);
+  } catch (error) {
+    console.error("❌ Error sending session started email:", error);
+  }
+};
+
 export default {
   sendWelcomeEmail,
   sendLoginNotification,
   sendPasswordResetEmail,
   sendProfileUpdateNotificationToUser,
   sendProfileUpdateNotificationToAdmin,
+  sendSessionStartedEmail,
   sendEnrollmentConfirmation,
   sendEventCreationNotificationToAdmin,
+  sendSessionFeedbackRequest,
   sendSessionFeedbackEmail,
   sendSessionLinkEmail,
   sendEventReminderEmail,
-  sendEventStartingSoonEmail,
-  sendThankYouEmail,
   bulkSendSessionLinks,
+  sendAttendeeEmail,
+  sendRequestEmail,
 };

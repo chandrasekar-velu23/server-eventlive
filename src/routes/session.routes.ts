@@ -1,6 +1,9 @@
 import express, { Router } from 'express';
 import * as sessionController from '../controllers/session.controller';
 import { authenticate, isSessionOrganizer, isSessionParticipant, requirePermission } from '../middleware/rbac.middleware';
+import multer from 'multer';
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router: Router = express.Router();
 
@@ -69,6 +72,14 @@ router.post('/:sessionId/start', isSessionOrganizer, sessionController.startSess
 
 // End session (Organizer only)
 router.post('/:sessionId/end', isSessionOrganizer, sessionController.endSession);
+
+// Upload recording (Organizer only)
+router.post(
+  '/:sessionId/recording',
+  isSessionOrganizer,
+  upload.single('recording'),
+  sessionController.uploadRecording
+);
 
 /**
  * Chat Routes

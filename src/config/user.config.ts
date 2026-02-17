@@ -1,0 +1,30 @@
+export const defaultUsers = [
+    {
+        name: "Super Admin",
+        email: "eventlive.admin@gmail.com",
+        password: "AdminPassword123!",
+        role: "Admin",
+        authProvider: "local",
+        onboardingCompleted: true,
+        bio: "System Administrator with full access.",
+    },
+    {
+        name: "Default Organizer",
+        email: "eventlive.organizer@gmail.com",
+        password: "OrganizerPassword123!",
+        role: "Organizer",
+        authProvider: "local",
+        onboardingCompleted: true,
+        organizationName: "Global Tech Events",
+        bio: "Organizer for tech conferences and meetups.",
+    },
+    {
+        name: "Default Attendee",
+        email: "eventlive.attendee@gmail.com",
+        password: "AttendeePassword123!",
+        role: "Attendee",
+        authProvider: "local",
+        onboardingCompleted: true,
+        bio: "Regular event attendee.",
+    },
+];

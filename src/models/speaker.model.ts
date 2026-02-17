@@ -6,6 +6,8 @@ export interface ISpeaker extends Document {
     bio: string;
     avatar?: string;
     email?: string;
+    tags?: string[];
+    labels?: string[];
     socialLinks?: {
         linkedin?: string;
         twitter?: string;
@@ -22,6 +24,8 @@ const SpeakerSchema: Schema = new Schema(
         bio: { type: String, required: true },
         avatar: { type: String },
         email: { type: String },
+        tags: [{ type: String }],
+        labels: [{ type: String }],
         socialLinks: {
             linkedin: String,
             twitter: String,
@@ -32,3 +36,4 @@ const SpeakerSchema: Schema = new Schema(
 );
 
 export default mongoose.model<ISpeaker>("Speaker", SpeakerSchema);
+
