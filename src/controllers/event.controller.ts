@@ -260,6 +260,7 @@ export const enrollEvent = async (req: Request, res: Response): Promise<void> =>
           sessionCode,
           event.startTime,
           event.endTime,
+          event.timezone || "UTC",
           event.description,
           "Virtual - EventLive"
         );
@@ -840,7 +841,8 @@ export const sendSessionLinkToAttendees = async (req: Request, res: Response): P
       event.title,
       sessionLink,
       sessionCode,
-      event.startTime
+      event.startTime,
+      event.timezone || "UTC"
     );
 
     res.status(200).json({
@@ -886,7 +888,8 @@ export const sendEventReminder = async (req: Request, res: Response): Promise<vo
           (attendee.userId as any).name,
           event.title,
           eventLink,
-          event.startTime
+          event.startTime,
+          event.timezone || "UTC"
         );
         sent++;
         // Small delay to avoid rate limiting
