@@ -734,7 +734,7 @@ export const sendLoginNotification = async (
     </div>
     
     <div class="btn-container">
-      <a href="${config.frontendUrl}/auth/reset-password" class="btn">Reset Password Now</a>
+      <a href="${config.frontendUrl}/forgot-password" class="btn">Reset Password Now</a>
     </div>
     
     <p style="font-size: 14px; color: #6b7280; text-align: center;">
@@ -757,7 +757,7 @@ Login Details:
 If this was you, you can safely ignore this email.
 
 If you didn't sign in, please reset your password immediately:
-${config.frontendUrl}/auth/reset-password
+${config.frontendUrl}/forgot-password
 
 © ${new Date().getFullYear()} EventLive Security Team
 Unsubscribe: ${getUnsubscribeLink(email)}

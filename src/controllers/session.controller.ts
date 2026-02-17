@@ -323,7 +323,7 @@ export const startSession = async (req: Request, res: Response): Promise<void> =
     try {
       const event = await Event.findById(session.eventId).populate('attendees');
       if (event && event.attendees && event.attendees.length > 0) {
-        const joinLink = `${process.env.FRONTEND_URL}/events/session/${session.sessionCode || 'join'}`;
+        const joinLink = `${process.env.FRONTEND_URL}/join/${session.sessionCode}`;
 
         // Send asynchronously
         event.attendees.forEach(async (attendee: any) => {
