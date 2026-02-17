@@ -152,6 +152,7 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Verify event ownership (checked twice but safe)
     if (event.organizerId.toString() !== userId) {
       res.status(403).json({ message: "Unauthorized: You do not own this event" });
       return;
@@ -160,11 +161,20 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
     // Import audit logging service
     const { detectEventChanges, logEventChanges } = await import("../services/auditLog.service");
 
+    // Prepare update data with proper Date objects
+    const preparedUpdateData = { ...updateData };
+    if (preparedUpdateData.startTime) {
+      preparedUpdateData.startTime = new Date(preparedUpdateData.startTime);
+    }
+    if (preparedUpdateData.endTime) {
+      preparedUpdateData.endTime = new Date(preparedUpdateData.endTime);
+    }
+
     // Detect changes before updating
-    const changes = detectEventChanges(event.toObject(), updateData);
+    const changes = detectEventChanges(event.toObject(), preparedUpdateData);
 
     // Update event
-    Object.assign(event, updateData);
+    Object.assign(event, preparedUpdateData);
     await event.save();
 
     // Log changes for admin audit trail
