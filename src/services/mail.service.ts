@@ -37,13 +37,26 @@ const EMAIL_CONFIG = {
  */
 const getLogoDataURI = (): string => {
   try {
-    const logoPath = path.resolve(__dirname, "../../../eventlive-client/public/logo-EventLive.svg");
-    const logoSvg = fs.readFileSync(logoPath, "utf8");
-    const base64Logo = Buffer.from(logoSvg).toString("base64");
-    return `data:image/svg+xml;base64,${base64Logo}`;
+    // Attempt to load from standard location, but don't crash if missing
+    const logoPaths = [
+      path.resolve(__dirname, "../../../eventlive-client/public/logo-eventlive.svg"),
+      path.resolve(__dirname, "../../client/public/logo-eventlive.svg"),
+      path.resolve(process.cwd(), "public/logo-eventlive.svg")
+    ];
+
+    for (const logoPath of logoPaths) {
+      if (fs.existsSync(logoPath)) {
+        const logoSvg = fs.readFileSync(logoPath, "utf8");
+        const base64Logo = Buffer.from(logoSvg).toString("base64");
+        return `data:image/svg+xml;base64,${base64Logo}`;
+      }
+    }
+
+    // If no logo found, return empty string (silent fallback)
+    console.log("Logo file not found, using default/empty logo.");
+    return "";
   } catch (error) {
-    console.error("Error loading logo:", error);
-    // Fallback: return empty data URI
+    console.warn("Failed to load logo (non-fatal):", error instanceof Error ? error.message : String(error));
     return "";
   }
 };

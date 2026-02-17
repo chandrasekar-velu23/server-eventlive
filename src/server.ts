@@ -8,16 +8,16 @@ import { seedUsers } from './seed';
 
 const PORT = config.port;
 
-// Connect to Database
+
 connectDB().then(() => {
-  // Run Seeding Script
+
   seedUsers();
 });
 
-// Create HTTP server
+
 const server = http.createServer(app);
 
-// Initialize Socket.io
+
 const io = new SocketIOServer(server, {
   cors: {
     origin: config.frontendUrl,
@@ -25,14 +25,13 @@ const io = new SocketIOServer(server, {
   },
 });
 
-// Initialize WebSocket handlers
+
 initializeWebSocket(io);
 
-// Make io accessible to routes if needed
+
 app.set('io', io);
 
 server.listen(PORT, () => {
   console.log(`EVENTLIVE server running on port ${PORT}`);
-  console.log(`WebSocket server ready`);
 });
 

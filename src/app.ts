@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
-import rateLimit from "express-rate-limit";
 import path from "path";
 import { config } from "./config";
 import routes from "./routes";
@@ -10,42 +9,38 @@ import errorHandler from "./middleware/error-handler";
 
 const app = express();
 
-app.use(morgan("dev"));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://eventliveclient.netlify.app",
+];
 
-// Fix for Google OAuth popup cross-origin communication
-app.use((_req, res, next) => {
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-  next();
-});
-
-// CORS must be the first middleware to ensure headers are always present
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      config.frontendUrl || "http://localhost:5173"
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000, // Increased limit for dev
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
+app.options("*", cors());
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use("/public", express.static(path.join(__dirname, "../public")));
 
-// Mount aggregated routes
 app.use("/api", routes);
+
+app.use(morgan("dev"));
 
 app.get("/", (_req, res) => {
   res.json({
@@ -54,7 +49,13 @@ app.get("/", (_req, res) => {
   });
 });
 
-// Health check endpoint for monitoring and deployment verification
+app.use((_req, res) => {
+  res.status(404).json({
+    status: "error",
+    message: "Route not found",
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -66,7 +67,20 @@ app.get("/health", (_req, res) => {
 
 app.use(errorHandler);
 
+app.use(
+  (
+    err: any,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error("Global Error:", err.message);
 
-// Mongoose connection moved to entry point (server.ts)
+    res.status(err.status || 500).json({
+      status: "error",
+      message: err.message || "Internal Server Error",
+    });
+  }
+);
 
 export default app;
