@@ -7,12 +7,22 @@ import { config } from "./config";
 import routes from "./routes";
 import errorHandler from "./middleware/error-handler";
 
+import helmet from "helmet";
+
 const app = express();
 
 const allowedOrigins = [
   "http://localhost:5173",
   "https://eventliveclient.netlify.app",
 ];
+
+// Security Headers
+app.use(
+  helmet({
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 app.use(
   cors({

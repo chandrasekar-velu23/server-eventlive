@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
+import Event from '../models/event.model';
+import User from '../models/user.model';
 import { sendSessionFeedbackEmail } from '../services/mail.service';
+import { sendNotification } from '../services/websocket.service';
 
 /**
  * Request Event Transcript
@@ -16,25 +19,36 @@ export const requestTranscript = async (req: Request, res: Response) => {
             });
         }
 
-        // TODO: Store the request in database for tracking
-        // For now, we'll send an email notification to the organizer
+        const event = await Event.findById(eventId);
+        if (!event) {
+            return res.status(404).json({ message: 'Event not found' });
+        }
 
-        // Get event organizer email (you'll need to fetch this from your event model)
-        // const event = await Event.findById(eventId).populate('organizer');
-        // const organizerEmail = event.organizer.email;
-
-        // For now, using a placeholder - replace with actual organizer email fetch
-        const organizerEmail = process.env.ADMIN_EMAIL || 'chandrasekarvelu23@gmail.com';
+        const organizer = await User.findById(event.organizerId);
+        const organizerEmail = organizer?.email || process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
 
         // Send email to organizer about transcript request
-        await sendSessionFeedbackEmail(
-            organizerEmail,
-            attendeeName,
-            attendeeEmail,
-            eventTitle,
-            `Transcript request for event: ${eventTitle}`,
-            { transcript: true, recording: false }
-        );
+        if (organizerEmail) {
+            await sendSessionFeedbackEmail(
+                organizerEmail,
+                attendeeName,
+                attendeeEmail,
+                eventTitle,
+                `Transcript request for event: ${eventTitle}`,
+                { transcript: true, recording: false }
+            );
+        }
+
+        // Send Dashboard Notification to Organizer
+        if (event.organizerId) {
+            sendNotification(event.organizerId.toString(), 'transcript_request', {
+                eventId: event._id,
+                eventTitle: event.title,
+                attendeeName,
+                attendeeEmail,
+                message: `${attendeeName} requested a transcript for ${event.title}`
+            });
+        }
 
         // Send confirmation email to attendee
         const nodemailer = require('nodemailer');
@@ -90,25 +104,36 @@ export const requestRecording = async (req: Request, res: Response) => {
             });
         }
 
-        // TODO: Store the request in database for tracking
-        // For now, we'll send an email notification to the organizer
+        const event = await Event.findById(eventId);
+        if (!event) {
+            return res.status(404).json({ message: 'Event not found' });
+        }
 
-        // Get event organizer email (you'll need to fetch this from your event model)
-        // const event = await Event.findById(eventId).populate('organizer');
-        // const organizerEmail = event.organizer.email;
-
-        // For now, using a placeholder - replace with actual organizer email fetch
-        const organizerEmail = process.env.ADMIN_EMAIL || 'chandrasekarvelu23@gmail.com';
+        const organizer = await User.findById(event.organizerId);
+        const organizerEmail = organizer?.email || process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
 
         // Send email to organizer about recording request
-        await sendSessionFeedbackEmail(
-            organizerEmail,
-            attendeeName,
-            attendeeEmail,
-            eventTitle,
-            `Recording request for event: ${eventTitle}`,
-            { transcript: false, recording: true }
-        );
+        if (organizerEmail) {
+            await sendSessionFeedbackEmail(
+                organizerEmail,
+                attendeeName,
+                attendeeEmail,
+                eventTitle,
+                `Recording request for event: ${eventTitle}`,
+                { transcript: false, recording: true }
+            );
+        }
+
+        // Send Dashboard Notification to Organizer
+        if (event.organizerId) {
+            sendNotification(event.organizerId.toString(), 'recording_request', {
+                eventId: event._id,
+                eventTitle: event.title,
+                attendeeName,
+                attendeeEmail,
+                message: `${attendeeName} requested a recording for ${event.title}`
+            });
+        }
 
         // Send confirmation email to attendee
         const nodemailer = require('nodemailer');

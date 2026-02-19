@@ -13,6 +13,6 @@ router.use('/events', eventRoutes);
 router.use('/sessions', sessionRoutes);
 router.use('/users', userRoutes);
 router.use('/speakers', speakerRoutes);
-router.use('/analytics', analyticsRoutes);
+router.use('/stats', analyticsRoutes);
 
 export default router;

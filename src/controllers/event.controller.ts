@@ -23,9 +23,12 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
     // Validation
     if (!title || !startTime || !endTime) {
+      console.warn("CreateEvent: Missing required fields", { title, startTime, endTime });
       res.status(400).json({ message: "Missing required fields: title, startTime, endTime" });
       return;
     }
+
+    console.log(`[EventController] Creating Event: ${title} | Start: ${startTime} | End: ${endTime} | TZ: ${timezone}`);
 
     if (!userId) {
       res.status(401).json({ message: "User not authenticated" });
@@ -95,6 +98,7 @@ export const getMyEvents = async (req: Request, res: Response): Promise<void> =>
     }
 
     const events = await Event.find({ organizerId: userId }).sort({ createdAt: -1 });
+    console.log(`[EventController] User ${userId} fetched ${events.length} events`);
     res.status(200).json({ data: events });
   } catch (error) {
     console.error("Get my events error:", error);
@@ -578,6 +582,7 @@ export const joinEventByCode = async (req: Request, res: Response): Promise<void
         scheduledStartTime: event.startTime,
         duration: 60, // Default or calc
         status: 'scheduled',
+        sessionCode: event.sessionCode,
         participants: []
       });
       await session.save();

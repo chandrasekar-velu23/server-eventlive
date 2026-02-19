@@ -10,14 +10,14 @@ import { format, toZonedTime } from 'date-fns-tz';
  */
 export const formatInTimeZone = (date: Date | string, timezone: string, formatStr: string = "PPpp"): string => {
     try {
+        // Fix: Handle HTML encoded timezones (e.g. Asia&#x2F;Kolkata -> Asia/Kolkata)
+        const cleanTimezone = timezone.replace(/&#x2F;/g, '/').replace(/&amp;/g, '&');
+
         const d = typeof date === 'string' ? new Date(date) : date;
-        // toZonedTime returns a Date instance representing the time in the zone (it shifts the hours)
-        // format from date-fns-tz handles the actual formatting with timezone awareness if needed,
-        // but typically we pass the zoned date to format.
-        const zonedDate = toZonedTime(d, timezone);
-        return format(zonedDate, formatStr, { timeZone: timezone });
+        const zonedDate = toZonedTime(d, cleanTimezone);
+        return format(zonedDate, formatStr, { timeZone: cleanTimezone });
     } catch (error) {
-        console.error("Error formatting date in timezone:", error);
+        console.error(`Error formatting date in timezone: ${timezone}`, error);
         return new Date(date).toLocaleString();
     }
 };

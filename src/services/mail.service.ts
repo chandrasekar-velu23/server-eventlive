@@ -16,6 +16,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Dev helper to log email details
+const logEmailInDev = (subject: string, to: string, context: string) => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`📧 [DEV-MAIL] Sending "${subject}" to [${to}] (${context})`);
+  }
+};
+
 // Email configuration
 const EMAIL_CONFIG = {
   from: {
@@ -41,6 +48,7 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Welcome Email', email, 'Signup');
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.support,
       to: email,
@@ -70,6 +78,7 @@ export const sendLoginNotification = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Login Notification', email, `IP: ${ip}, Device: ${device}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.security,
       to: email,
@@ -263,6 +272,7 @@ export const sendEnrollmentConfirmation = async (
       ];
     }
 
+    logEmailInDev('Enrollment Confirmation', email, `Event: ${eventTitle}`);
     await transporter.sendMail(mailOptions);
     console.log(`✅ Enrollment confirmation sent to ${email} `);
   } catch (error) {

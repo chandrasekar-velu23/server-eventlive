@@ -15,7 +15,7 @@ router.post("/", authGuard, sanitizeInput, createEvent);
 router.get("/my", authGuard, getMyEvents) as any;
 router.get("/my-attendees", authGuard, getAllMyAttendees) as any;
 router.get("/enrolled", authGuard, getEnrolledEvents) as any;
-router.get("/analytics/global", authGuard, getGlobalAnalytics) as any;
+router.get("/stats/global", authGuard, getGlobalAnalytics) as any;
 router.get("/all", getAllEvents) as any;
 router.get("/:id", optionalAuth, getEventById) as any;
 router.get("/join/:code", optionalAuth, joinEventByCode) as any;
@@ -23,7 +23,7 @@ router.put("/:id", authGuard, sanitizeInput, updateEvent) as any;
 router.delete("/:id", authGuard, deleteEvent) as any;
 router.post("/:id/enroll", authGuard, enrollEvent) as any;
 router.get("/:id/attendees", authGuard, getEventAttendees) as any;
-router.get("/:id/analytics", authGuard, getEventAnalytics) as any;
+router.get("/:id/stats", authGuard, getEventAnalytics) as any;
 router.post("/:id/feedback", authGuard, sanitizeInput, submitEventFeedback) as any;
 
 // Admin-only routes for audit logs
