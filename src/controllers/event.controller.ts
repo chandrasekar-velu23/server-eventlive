@@ -961,37 +961,20 @@ export const sendCustomEmailToAttendees = async (req: Request, res: Response): P
       recipients = recipients.filter((r: any) => attendeeEmails.includes(r.email));
     }
 
-    // Send custom emails (using nodemailer directly)
-    const nodemailer = await import("nodemailer");
-    const transporter = nodemailer.default.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // Send custom emails (using mail service for consistency)
+    const { sendAttendeeEmail } = await import("../services/mail.service");
 
     let sent = 0;
     let failed = 0;
 
     for (const recipient of recipients) {
       try {
-        await transporter.sendMail({
-          from: `"EventLive Events" <${process.env.EMAIL_USER}>`,
-          to: recipient.email,
-          subject: subject,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h3>Hello ${recipient.name},</h3>
-              <p>${message.replace(/\n/g, "<br>")}</p>
-              <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-              <p style="font-size: 12px; color: #777;">
-                This email was sent regarding: <strong>${event.title}</strong><br>
-                © ${new Date().getFullYear()} EventLive. All rights reserved.
-              </p>
-            </div>
-          `,
-        });
+        const emailContent = `Hello ${recipient.name},\n\n${message}`;
+        await sendAttendeeEmail(
+          recipient.email,
+          subject,
+          emailContent
+        );
         sent++;
         await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {

@@ -14,6 +14,7 @@ const UPLOAD_DIRS = {
     events: path.join(process.cwd(), "public/uploads/events/covers"),
     logos: path.join(process.cwd(), "public/uploads/events/logos"),
     speakers: path.join(process.cwd(), "public/uploads/speakers"),
+    recordings: path.join(process.cwd(), "public/uploads/recordings"),
 };
 
 // Ensure all upload directories exist (only needed for local)

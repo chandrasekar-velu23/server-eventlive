@@ -44,16 +44,50 @@ export const getPublicUrl = (filename: string): string => {
 };
 
 export const uploadFile = async (
-    file: Express.Multer.File,
+    file: Express.Multer.File | { buffer: Buffer, originalname: string, mimetype: string },
     key: string,
     contentType: string
 ): Promise<string> => {
+    // Check storage provider
+    if (process.env.STORAGE_PROVIDER === 'local') {
+        const fs = await import('fs');
+        const path = await import('path');
+
+        // Construct local path
+        // key might be "recordings/sessionId/filename.webm"
+        // We want to save to "public/uploads/recordings/..."
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+        const fullPath = path.join(uploadDir, key);
+        const dir = path.dirname(fullPath);
+
+        // Ensure directory exists
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+
+        // Write file
+        let buffer: Buffer;
+        if ('buffer' in file && file.buffer) {
+            buffer = file.buffer;
+        } else if ('path' in file && file.path) {
+            buffer = fs.readFileSync(file.path);
+        } else {
+            throw new Error("File buffer or path not found");
+        }
+
+        fs.writeFileSync(fullPath, buffer);
+
+        // Return URL
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+        return `${backendUrl}/uploads/${key}`;
+    }
+
     const command = new PutObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
-        Body: file.buffer,
+        Body: 'buffer' in file ? file.buffer : undefined, // Handle if not in memory? Middleware used memoryStorage so buffer is there.
         ContentType: contentType,
-        ACL: "public-read", // R2 doesn't support ACLs the same way but good for compatibility if replaced
+        // ACL: "public-read", // R2 doesn't support ACLs
     });
 
     try {

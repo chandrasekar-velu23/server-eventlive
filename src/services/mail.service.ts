@@ -16,6 +16,15 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Verify connection configuration
+transporter.verify(function (error, success) {
+  if (error) {
+    console.error("❌ Email Service Error: Connection failed", error);
+  } else {
+    console.log("✅ Email Service: Server is ready to take our messages");
+  }
+});
+
 // Dev helper to log email details
 const logEmailInDev = (subject: string, to: string, context: string) => {
   if (process.env.NODE_ENV !== 'production') {
@@ -60,7 +69,8 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
     console.log(`✅ Welcome email sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending welcome email:", error);
-    throw error;
+    // In production, you might want to throw or handle this more gracefully
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -90,7 +100,7 @@ export const sendLoginNotification = async (
     console.log(`✅ Login notification sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending login notification:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -102,6 +112,7 @@ export const sendPasswordResetEmail = async (email: string, resetToken: string) 
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Password Reset', email, 'Security');
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.security,
       to: email,
@@ -129,6 +140,7 @@ export const sendProfileUpdateNotificationToUser = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Profile Update User', email, `Changes: ${changes.length}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.security,
       to: email,
@@ -140,7 +152,7 @@ export const sendProfileUpdateNotificationToUser = async (
     console.log(`✅ Profile update notification sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending profile update email to user:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -187,6 +199,7 @@ export const sendRoleNotification = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Role Notification', finalTo, `Role: ${role}, Action: ${action}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.system,
       to: finalTo,
@@ -215,6 +228,7 @@ export const sendProfileUpdateNotificationToAdmin = async (
   const html = baseTemplate(contentHtml);
 
   try {
+    logEmailInDev('Profile Update Admin', adminEmail, `User: ${userEmail}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.system,
       to: adminEmail,
@@ -226,7 +240,7 @@ export const sendProfileUpdateNotificationToAdmin = async (
     console.log(`✅ Admin notification sent for ${userEmail}`);
   } catch (error) {
     console.error("❌ Error sending admin notification:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -283,7 +297,7 @@ export const sendEnrollmentConfirmation = async (
       // Retry without attachments? 
       // Simplification: We proceed
     }
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -299,6 +313,7 @@ export const sendEventCreationNotificationToAdmin = async (
   const html = baseTemplate(contentHtml);
 
   try {
+    logEmailInDev('Event Creation Admin', adminEmail, `Event: ${eventDetails.title}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.system,
       to: adminEmail,
@@ -310,7 +325,7 @@ export const sendEventCreationNotificationToAdmin = async (
     console.log(`✅ Admin notification sent for new event: ${eventDetails.title} `);
   } catch (error) {
     console.error("❌ Error sending admin notification:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -327,6 +342,7 @@ export const sendSessionFeedbackRequest = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Feedback Request', email, `Event: ${eventTitle}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.feedback,
       to: email,
@@ -338,7 +354,7 @@ export const sendSessionFeedbackRequest = async (
     console.log(`✅ Feedback request sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending feedback request:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -359,6 +375,7 @@ export const sendSessionFeedbackEmail = async (
   const html = baseTemplate(contentHtml, organizerEmail);
 
   try {
+    logEmailInDev('Feedback to Organizer', organizerEmail, `From: ${attendeeName}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.feedback,
       to: organizerEmail,
@@ -370,7 +387,7 @@ export const sendSessionFeedbackEmail = async (
     console.log(`✅ Feedback email sent to organizer (${organizerEmail})`);
   } catch (error) {
     console.error("❌ Error sending feedback email:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -392,6 +409,7 @@ export const sendSessionLinkEmail = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Session Link', email, `Event: ${eventTitle}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.events,
       to: email,
@@ -424,6 +442,7 @@ export const sendEventReminderEmail = async (
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Event Reminder', email, `Event: ${eventTitle}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.events,
       to: email,
@@ -435,7 +454,7 @@ export const sendEventReminderEmail = async (
     console.log(`✅ Event reminder email sent to ${email}`);
   } catch (error) {
     console.error("❌ Error sending event reminder email:", error);
-    throw error;
+    if (process.env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -495,6 +514,7 @@ export const sendAttendeeEmail = async (
   const html = baseTemplate(contentHtml, toEmail);
 
   try {
+    logEmailInDev('Attendee Email', toEmail, `Subject: ${subject}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.events,
       to: toEmail,
@@ -526,6 +546,7 @@ export const sendRequestEmail = async (
   const html = baseTemplate(contentHtml, targetEmail);
 
   try {
+    logEmailInDev('Request Email', targetEmail || "", `From: ${fromEmail}, Type: ${type}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.system,
       to: targetEmail,
@@ -549,6 +570,7 @@ export const sendSessionStartedEmail = async (email: string, name: string, sessi
   const html = baseTemplate(contentHtml, email);
 
   try {
+    logEmailInDev('Session Started', email, `Session: ${sessionTitle}`);
     await transporter.sendMail({
       from: EMAIL_CONFIG.from.events,
       to: email,
