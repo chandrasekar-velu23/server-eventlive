@@ -9,6 +9,9 @@ import { generateICS } from "./email-templates/utils";
  * =================================================================== */
 
 const transporter = nodemailer.createTransport({
+  secure: false,
+  host: "smtp.gmail.com",
+  port: 587,
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
