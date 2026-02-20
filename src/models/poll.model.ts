@@ -28,7 +28,7 @@ export interface IPoll extends Document {
 const PollOptionSchema = new Schema<IPollOption>(
   {
     id: {
-      type: String,
+      type: Schema.Types.Mixed, // Accept both string and number ids
       required: true,
     },
     text: {
@@ -100,7 +100,7 @@ const PollSchema = new Schema<IPoll>(
     respondents: [PollRespondentSchema],
     endsAt: {
       type: Date,
-      required: true,
+      default: () => new Date(Date.now() + 60 * 60 * 1000), // Default: 1 hour from now
     },
   },
   {

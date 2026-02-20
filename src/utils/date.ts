@@ -10,8 +10,23 @@ import { format, toZonedTime } from 'date-fns-tz';
  */
 export const formatInTimeZone = (date: Date | string, timezone: string, formatStr: string = "PPpp"): string => {
     try {
-        // Fix: Handle HTML encoded timezones (e.g. Asia&#x2F;Kolkata -> Asia/Kolkata)
-        const cleanTimezone = timezone.replace(/&#x2F;/g, '/').replace(/&amp;/g, '&');
+        let cleanTimezone = timezone;
+
+        // Iteratively decode to handle double encoding
+        // e.g., "Asia&amp;#x2F;Calcutta" -> "Asia&#x2F;Calcutta" -> "Asia/Calcutta"
+        let previous;
+        let attempts = 0;
+        do {
+            previous = cleanTimezone;
+            cleanTimezone = decodeURIComponent(cleanTimezone);
+            cleanTimezone = cleanTimezone
+                .replace(/&amp;/g, '&')
+                .replace(/&#x2F;/g, '/')
+                .replace(/&#x27;/g, "'")
+                .replace(/&quot;/g, '"');
+            attempts++;
+        } while (cleanTimezone !== previous && attempts < 5);
+
 
         const d = typeof date === 'string' ? new Date(date) : date;
         const zonedDate = toZonedTime(d, cleanTimezone);

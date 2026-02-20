@@ -1,4 +1,12 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+    S3Client,
+    PutObjectCommand,
+    DeleteObjectCommand,
+    CreateMultipartUploadCommand,
+    UploadPartCommand,
+    CompleteMultipartUploadCommand,
+    AbortMultipartUploadCommand,
+} from "@aws-sdk/client-s3";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -97,4 +105,65 @@ export const uploadFile = async (
         console.error("Error uploading file to R2:", error);
         throw new Error("Failed to upload file to storage");
     }
+};
+
+/* ─────────────────────────────────────────────────────────────────
+ * Multipart Upload helpers (used by chunked recording controller)
+ * ───────────────────────────────────────────────────────────────── */
+
+/** Create a new multipart upload and return the UploadId */
+export const initMultipartUpload = async (key: string, contentType: string): Promise<string> => {
+    const cmd = new CreateMultipartUploadCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        ContentType: contentType,
+    });
+    const res = await s3Client.send(cmd);
+    if (!res.UploadId) throw new Error('R2 did not return an UploadId');
+    return res.UploadId;
+};
+
+/** Upload a single part (1-indexed). Returns the ETag needed for completion. */
+export const uploadPart = async (
+    key: string,
+    uploadId: string,
+    partNumber: number, // 1–10000
+    body: Buffer,
+): Promise<{ ETag: string; PartNumber: number }> => {
+    const cmd = new UploadPartCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        Body: body,
+        ContentLength: body.byteLength,
+    });
+    const res = await s3Client.send(cmd);
+    if (!res.ETag) throw new Error(`No ETag for part ${partNumber}`);
+    return { ETag: res.ETag, PartNumber: partNumber };
+};
+
+/** Complete the multipart upload and return the final public URL */
+export const completeMultipartUpload = async (
+    key: string,
+    uploadId: string,
+    parts: { ETag: string; PartNumber: number }[],
+): Promise<string> => {
+    const cmd = new CompleteMultipartUploadCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: parts },
+    });
+    await s3Client.send(cmd);
+    return getPublicUrl(key);
+};
+
+/** Abort an incomplete multipart upload (cleanup on error) */
+export const abortMultipartUpload = async (key: string, uploadId: string): Promise<void> => {
+    await s3Client.send(new AbortMultipartUploadCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+    }));
 };

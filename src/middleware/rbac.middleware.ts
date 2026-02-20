@@ -128,6 +128,11 @@ export const authenticate = async (
         }
       }
 
+      // Map 'id' from token to 'userId' for consistency across codebase
+      if (decoded.id && !decoded.userId) {
+        decoded.userId = decoded.id;
+      }
+
       req.user = decoded;
       req.permissions = ROLE_PERMISSIONS[decoded.role] || [];
       next();
@@ -149,7 +154,7 @@ export const isSessionOrganizer = async (
 ): Promise<void> => {
   try {
     const { sessionId } = req.params;
-    const userId = req.user?.userId;
+    const userId = req.user?.userId || req.user?.id;
 
     if (!sessionId || !userId) {
       res.status(400).json({ message: 'Missing sessionId or userId' });
@@ -183,7 +188,7 @@ export const isSessionParticipant = async (
 ): Promise<void> => {
   try {
     const { sessionId } = req.params;
-    const userId = req.user?.userId;
+    const userId = req.user?.userId || req.user?.id;
 
     if (!sessionId || !userId) {
       res.status(400).json({ message: 'Missing sessionId or userId' });
@@ -226,7 +231,7 @@ export const requirePermission = (permission: string) => {
   ): Promise<void> => {
     try {
       const { sessionId } = req.params;
-      const userId = req.user?.userId;
+      const userId = req.user?.userId || req.user?.id;
 
       if (!sessionId || !userId) {
         res.status(400).json({ message: 'Missing sessionId or userId' });

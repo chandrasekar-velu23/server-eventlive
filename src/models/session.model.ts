@@ -22,7 +22,7 @@ export interface ISession extends Document {
   title: string;
   sessionCode: string;
   recordingUrl?: string;
-  recordingStatus?: 'processing' | 'processed' | 'failed';
+  recordingStatus?: 'recording' | 'processing' | 'processed' | 'failed';
   description?: string;
   scheduledStartTime: Date;
   duration: number; // in minutes
@@ -64,7 +64,7 @@ const SessionSchema = new Schema<ISession>(
     title: { type: String, required: true },
     sessionCode: { type: String, required: true, unique: true },
     recordingUrl: { type: String },
-    recordingStatus: { type: String, enum: ['processing', 'processed', 'failed'] },
+    recordingStatus: { type: String, enum: ['recording', 'processing', 'processed', 'failed'] },
     description: { type: String },
     scheduledStartTime: { type: Date, required: true },
     duration: { type: Number, required: true }, // minutes

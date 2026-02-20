@@ -5,7 +5,7 @@ import Session, { ISession, IParticipant } from '../models/session.model';
 import ChatMessage from '../models/chatMessage.model';
 import Poll from '../models/poll.model';
 import Question from '../models/question.model';
-import { hasPermission } from '../middleware/rbac.middleware';
+import { hasPermission, ROLE_PERMISSIONS } from '../middleware/rbac.middleware';
 import { logCheckIn, logCheckOut } from './attendance.service';
 import ActivityLog from '../models/activityLog.model';
 
@@ -105,8 +105,19 @@ export const initializeWebSocket = (io: Server) => {
         const { sessionId } = data;
         const userId = socket.data.user?.userId;
 
+        if (!sessionId || !userId) {
+          socket.emit('error', { message: 'Missing sessionId or userId' });
+          return;
+        }
+
         // Join Socket.io room
         socket.join(sessionId);
+
+        // Track which sessions this socket has joined (for clean disconnect)
+        if (!socket.data.joinedSessions) socket.data.joinedSessions = [];
+        if (!socket.data.joinedSessions.includes(sessionId)) {
+          socket.data.joinedSessions.push(sessionId);
+        }
 
         // Add participant to database
         const session = await Session.findById(sessionId);
@@ -115,15 +126,30 @@ export const initializeWebSocket = (io: Server) => {
           return;
         }
 
+        // Check session is not ended
+        if (session.status === 'ended' || session.status === 'cancelled') {
+          socket.emit('error', { message: 'Session has already ended' });
+          return;
+        }
+
+        let role: string = 'attendee';
         const existingParticipant = session.participants.find(
           (p: IParticipant) => p.userId.toString() === userId
         );
 
-        if (!existingParticipant) {
+        if (existingParticipant) {
+          // Update leftAt to null in case they re-joined
+          existingParticipant.leftAt = undefined;
+          role = existingParticipant.role;
+          await session.save();
+        } else {
+          // Check if organizer
+          role = session.organizerId.toString() === userId ? 'organizer' : 'attendee';
+
           session.participants.push({
             userId,
             joinedAt: new Date(),
-            role: 'attendee',
+            role: role as any,
             isMuted: true,
             videoEnabled: false,
             screenshareActive: false,
@@ -135,11 +161,20 @@ export const initializeWebSocket = (io: Server) => {
           await session.save();
         }
 
+        // Cache role + permissions in socket.data to avoid DB lookup on every event
+        socket.data.sessionRole = role;
+        socket.data.sessionPermissions = role === 'organizer'
+          ? '*'  // all
+          : (ROLE_PERMISSIONS[role] || []);
+        socket.data.currentSessionId = sessionId;
+
         // Broadcast to room
         sessionNamespace.to(sessionId).emit('participant-joined', {
           userId,
           userName: socket.data.user?.name,
-          participantCount: session.participants.length,
+          userAvatar: socket.data.user?.avatar,
+          role,
+          participantCount: session.participants.filter((p: IParticipant) => !p.leftAt).length,
           timestamp: new Date(),
         });
 
@@ -150,7 +185,7 @@ export const initializeWebSocket = (io: Server) => {
             eventId: session.eventId,
             sessionId: session._id,
             delta: 1,
-            total: session.participants.length
+            total: session.participants.filter((p: IParticipant) => !p.leftAt).length
           });
         }
 
@@ -162,8 +197,6 @@ export const initializeWebSocket = (io: Server) => {
             userId,
             userEmail: socket.data.user?.email || "",
             userName: socket.data.user?.name || "Unknown",
-            // req object is not available here, but we can pass IP/UserAgent from handshake if needed
-            // For now, we'll let service handle missing req
           });
         } catch (logError) {
           console.error("Failed to log check-in in WS:", logError);
@@ -171,7 +204,15 @@ export const initializeWebSocket = (io: Server) => {
 
         socket.emit('session-joined', {
           message: 'Successfully joined session',
-          participants: session.participants.length,
+          participants: session.participants.filter((p: IParticipant) => !p.leftAt).length,
+          role,
+          sessionCode: session.sessionCode,
+          sessionSettings: {
+            chatEnabled: session.chatEnabled,
+            pollsEnabled: session.pollsEnabled,
+            qaEnabled: session.qaEnabled,
+            allowRecording: session.allowRecording,
+          }
         });
       } catch (error) {
         console.error('Join session error:', error);
@@ -294,10 +335,23 @@ export const initializeWebSocket = (io: Server) => {
         const { sessionId, content } = data;
         const userId = socket.data.user?.userId;
 
-        // Validate permission
-        const hasPermissions = await hasPermission(userId, sessionId, 'send_chat_message');
-        if (!hasPermissions) {
-          socket.emit('error', { message: 'Permission denied' });
+        if (!content || !content.trim()) {
+          socket.emit('error', { message: 'Message content cannot be empty' });
+          return;
+        }
+
+        if (content.length > 2000) {
+          socket.emit('error', { message: 'Message too long (max 2000 chars)' });
+          return;
+        }
+
+        // Use cached permissions first, fall back to DB check
+        const canSend = socket.data.sessionPermissions === '*' ||
+          (Array.isArray(socket.data.sessionPermissions) && socket.data.sessionPermissions.includes('send_chat_message')) ||
+          await hasPermission(userId, sessionId, 'send_chat_message');
+
+        if (!canSend) {
+          socket.emit('error', { message: 'Permission denied: cannot send messages' });
           return;
         }
 
@@ -311,30 +365,19 @@ export const initializeWebSocket = (io: Server) => {
         });
 
         await message.save();
-        await message.populate('senderId', 'name avatar');
 
         // Broadcast to room
         sessionNamespace.to(sessionId).emit('new-message', {
-          _id: message._id,
+          _id: message._id.toString(),
           senderId: userId,
           senderName: socket.data.user?.name,
+          senderAvatar: socket.data.user?.avatar,
           content: message.content,
+          messageType: 'text',
           timestamp: message.createdAt,
         });
 
-        // Log Activity
-        await ActivityLog.create({
-          user: userId,
-          action: "CHAT_MESSAGE",
-          details: {
-            sessionId,
-            messageId: message._id,
-            contentLength: message.content.length
-          },
-          ip: socket.handshake.address
-        });
-
-        socket.emit('message-sent', { messageId: message._id });
+        socket.emit('message-sent', { messageId: message._id.toString() });
       } catch (error) {
         console.error('Send message error:', error);
         socket.emit('error', { message: 'Failed to send message' });
@@ -375,9 +418,74 @@ export const initializeWebSocket = (io: Server) => {
      * POLL EVENTS
      */
 
+    // Host creates a new poll
+    socket.on('create-poll', async (data) => {
+      try {
+        const { sessionId, question, options } = data;
+        const userId = socket.data.user?.userId;
+
+        // Only organizer/moderator can create polls
+        const canCreate = socket.data.sessionPermissions === '*' ||
+          await hasPermission(userId, sessionId, 'manage_polls');
+
+        if (!canCreate) {
+          socket.emit('error', { message: 'Only the host can create polls' });
+          return;
+        }
+
+        if (!question || !question.trim()) {
+          socket.emit('error', { message: 'Poll question is required' });
+          return;
+        }
+
+        const validOptions = (options as string[]).filter(o => o && o.trim());
+        if (validOptions.length < 2) {
+          socket.emit('error', { message: 'At least 2 options are required' });
+          return;
+        }
+
+        const poll = new Poll({
+          sessionId,
+          createdBy: userId,
+          question: question.trim(),
+          options: validOptions.map((text, index) => ({ id: index, text: text.trim(), votes: 0 })),
+          isActive: true,
+          totalVotes: 0,
+          respondents: [],
+        });
+
+        await poll.save();
+
+        // Broadcast new poll to all in session
+        sessionNamespace.to(sessionId).emit('new-poll', {
+          _id: poll._id.toString(),
+          question: poll.question,
+          options: poll.options,
+          isActive: true,
+          totalVotes: 0,
+          createdBy: userId,
+        });
+
+        socket.emit('poll-created', { pollId: poll._id.toString() });
+
+        await ActivityLog.create({
+          user: userId,
+          action: 'POLL_CREATED',
+          details: { sessionId, pollId: poll._id },
+          ip: socket.handshake.address
+        }).catch(() => { });
+
+      } catch (error) {
+        console.error('Create poll error:', error);
+        socket.emit('error', { message: 'Failed to create poll' });
+      }
+    });
+
     socket.on('vote-poll', async (data) => {
       try {
-        const { sessionId, pollId, answers } = data;
+        // Support both 'answer' (single int) and 'answers' (array) for compatibility
+        const { sessionId, pollId, answers: rawAnswers, answer } = data;
+        const answers: number[] = Array.isArray(rawAnswers) ? rawAnswers : [answer];
         const userId = socket.data.user?.userId;
 
         // Validate permission
@@ -462,6 +570,45 @@ export const initializeWebSocket = (io: Server) => {
     /**
      * QUESTION/Q&A EVENTS
      */
+
+    /**
+     * Q&A UPVOTE (was missing)
+     */
+    socket.on('upvote-question', async (data) => {
+      try {
+        const { sessionId, questionId } = data;
+        const userId = socket.data.user?.userId;
+
+        const question = await Question.findById(questionId);
+        if (!question) {
+          socket.emit('error', { message: 'Question not found' });
+          return;
+        }
+
+        // Toggle upvote
+        const upvotes: string[] = (question as any).upvotes || [];
+        const idx = upvotes.indexOf(userId);
+        if (idx === -1) {
+          upvotes.push(userId);
+        } else {
+          upvotes.splice(idx, 1);
+        }
+        (question as any).upvotes = upvotes;
+        await question.save();
+
+        // Broadcast updated upvote list
+        sessionNamespace.to(sessionId).emit('question-upvoted', {
+          questionId: question._id.toString(),
+          upvotes,
+        });
+
+        socket.emit('question-upvoted', { questionId: question._id.toString(), upvotes });
+
+      } catch (error) {
+        console.error('Upvote question error:', error);
+        socket.emit('error', { message: 'Failed to upvote question' });
+      }
+    });
 
     socket.on('ask-question', async (data) => {
       try {
@@ -655,50 +802,53 @@ export const initializeWebSocket = (io: Server) => {
      */
 
     socket.on('disconnect', async () => {
-      console.log(`❌ User disconnected: ${socket.data.user?.userId}`);
+      const userId = socket.data.user?.userId;
+      console.log(`❌ User disconnected: ${userId}`);
 
-      // Clean up participant state
-      const rooms = socket.rooms;
-      rooms.forEach(async (room) => {
-        const session = await Session.findById(room);
-        if (session) {
+      // Only clean up sessions this socket explicitly joined (tracked in joinedSessions)
+      const joinedSessions: string[] = socket.data.joinedSessions || [];
+
+      for (const sessionId of joinedSessions) {
+        try {
+          const session = await Session.findById(sessionId);
+          if (!session || session.status === 'ended') continue;
+
           const participant = session.participants.find(
-            (p: IParticipant) => p.userId.toString() === socket.data.user?.userId
+            (p: IParticipant) => p.userId.toString() === userId
           );
-          if (participant) {
-            participant.leftAt = new Date();
-            await session.save();
+          if (!participant || participant.leftAt) continue;
 
-            // Notify others
-            sessionNamespace.to(room).emit('participant-left', {
-              userId: socket.data.user?.userId,
-              participantCount: session.participants.length,
+          participant.leftAt = new Date();
+          await session.save();
+
+          const activeCount = session.participants.filter((p: IParticipant) => !p.leftAt).length;
+
+          // Notify others
+          sessionNamespace.to(sessionId).emit('participant-left', {
+            userId,
+            userName: socket.data.user?.name,
+            participantCount: activeCount,
+            timestamp: new Date(),
+          });
+
+          // Trigger Analytics Update for Organizer
+          if (session.organizerId) {
+            sendStatsUpdate(session.organizerId.toString(), {
+              type: 'attendance',
+              eventId: session.eventId,
+              sessionId: session._id,
+              delta: -1,
+              total: activeCount
             });
-
-            // Trigger Analytics Update for Organizer
-            if (session.organizerId) {
-              sendStatsUpdate(session.organizerId.toString(), {
-                type: 'attendance',
-                eventId: session.eventId,
-                sessionId: session._id,
-                delta: -1,
-                total: session.participants.length
-              });
-            }
-
-            // Log Check-out on disconnect
-            try {
-              // We need the sessionId here, which is the room id
-              await logCheckOut({
-                sessionId: room,
-                userId: socket.data.user?.userId,
-              });
-            } catch (logError) {
-              // Ignore error if check-out already happened or session invalid
-            }
           }
+
+          // Log Check-out on disconnect
+          await logCheckOut({ sessionId, userId }).catch(() => { });
+
+        } catch (err) {
+          console.error(`Disconnect cleanup error for session ${sessionId}:`, err);
         }
-      });
+      }
     });
   });
 

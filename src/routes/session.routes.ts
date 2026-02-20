@@ -1,9 +1,13 @@
 import express, { Router } from 'express';
 import * as sessionController from '../controllers/session.controller';
+import * as recordingController from '../controllers/recordingUpload.controller';
 import { authenticate, isSessionOrganizer, isSessionParticipant, requirePermission } from '../middleware/rbac.middleware';
 import multer from 'multer';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB — needed for video chunks
+});
 
 const router: Router = express.Router();
 
@@ -73,7 +77,31 @@ router.post('/:sessionId/start', isSessionOrganizer, sessionController.startSess
 // End session (Organizer only)
 router.post('/:sessionId/end', isSessionOrganizer, sessionController.endSession);
 
-// Upload recording (Organizer only)
+/** ─────────────────────────────────────────────
+ * Recording Routes  (chunked multipart → R2)
+ * ───────────────────────────────────────────── */
+
+// Step 1: Initialise a new recording upload session
+router.post(
+  '/:sessionId/recording/init',
+  isSessionOrganizer,
+  recordingController.initRecordingUpload
+);
+
+// Step 2: Accept a 5-second video chunk (no size auth check — stream-friendly)
+router.post(
+  '/:sessionId/recording/chunk',
+  upload.single('chunk'),          // up to 100 MB per chunk is already limited by multer default
+  recordingController.uploadRecordingChunk
+);
+
+// Step 3: Complete & commit the multipart upload to R2
+router.post(
+  '/:sessionId/recording/finalize',
+  recordingController.finalizeRecordingUpload
+);
+
+// Legacy single-shot upload (kept for backward compat)
 router.post(
   '/:sessionId/recording',
   isSessionOrganizer,

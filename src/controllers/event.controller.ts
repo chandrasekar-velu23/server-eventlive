@@ -129,9 +129,18 @@ export const getEventById = async (req: Request, res: Response): Promise<void> =
     const userId = (req as any).user?.id;
 
     // Check visibility permissions
-    if (event.visibility === 'private' && event.organizerId.toString() !== userId) {
-      res.status(403).json({ message: "Access denied: Private event" });
-      return;
+    // Allow if:
+    // 1. Event is Public
+    // 2. User is the Organizer
+    // 3. User is an Enrolled Attendee
+    if (event.visibility === 'private') {
+      const isOrganizer = event.organizerId.toString() === userId;
+      const isEnrolled = event.attendees && event.attendees.map(a => a.toString()).includes(userId);
+
+      if (!isOrganizer && !isEnrolled) {
+        res.status(403).json({ message: "Access denied: Private event" });
+        return;
+      }
     }
 
     res.status(200).json({ data: event });
@@ -832,7 +841,7 @@ export const sendSessionLinkToAttendees = async (req: Request, res: Response): P
     }
 
     // Verify event ownership
-    const event = await Event.findById(id).populate("attendees.userId", "name email");
+    const event = await Event.findById(id).populate("attendees", "name email");
     if (!event) {
       res.status(404).json({ message: "Event not found" });
       return;
@@ -845,8 +854,8 @@ export const sendSessionLinkToAttendees = async (req: Request, res: Response): P
 
     // Prepare attendee list
     const attendees = (event.attendees || []).map((a: any) => ({
-      email: a.userId.email,
-      name: a.userId.name,
+      email: a.email,
+      name: a.name,
     }));
 
     // Send emails
@@ -879,7 +888,7 @@ export const sendEventReminder = async (req: Request, res: Response): Promise<vo
     const userId = (req as any).user?.id;
 
     // Verify event ownership
-    const event = await Event.findById(id).populate("attendees.userId", "name email");
+    const event = await Event.findById(id).populate("attendees", "name email");
     if (!event) {
       res.status(404).json({ message: "Event not found" });
       return;
@@ -899,8 +908,8 @@ export const sendEventReminder = async (req: Request, res: Response): Promise<vo
     for (const attendee of (event.attendees || []) as any[]) {
       try {
         await sendEventReminderEmail(
-          (attendee.userId as any).email,
-          (attendee.userId as any).name,
+          attendee.email,
+          attendee.name,
           event.title,
           eventLink,
           event.startTime,
@@ -940,7 +949,7 @@ export const sendCustomEmailToAttendees = async (req: Request, res: Response): P
     }
 
     // Verify event ownership
-    const event = await Event.findById(id).populate("attendees.userId", "name email");
+    const event = await Event.findById(id).populate("attendees", "name email");
     if (!event) {
       res.status(404).json({ message: "Event not found" });
       return;
@@ -953,8 +962,8 @@ export const sendCustomEmailToAttendees = async (req: Request, res: Response): P
 
     // Filter attendees if specific emails provided
     let recipients = (event.attendees || []).map((a: any) => ({
-      email: a.userId.email,
-      name: a.userId.name,
+      email: a.email,
+      name: a.name,
     }));
 
     if (attendeeEmails && attendeeEmails.length > 0) {
