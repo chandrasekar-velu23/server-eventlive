@@ -3,6 +3,7 @@ import Event from '../models/event.model';
 import User from '../models/user.model';
 import { sendSessionFeedbackEmail } from '../services/mail.service';
 import { sendNotification } from '../services/websocket.service';
+import { logActivity } from '../services/activityLog.service';
 
 /**
  * Request Event Transcript
@@ -49,6 +50,9 @@ export const requestTranscript = async (req: Request, res: Response) => {
                 message: `${attendeeName} requested a transcript for ${event.title}`
             });
         }
+
+        // Log Activity
+        await logActivity(req.user?.userId || 'system', "Transcript Requested", { eventId: event._id, title: event.title }, req);
 
         // Send confirmation email to attendee
         const nodemailer = require('nodemailer');
@@ -134,6 +138,9 @@ export const requestRecording = async (req: Request, res: Response) => {
                 message: `${attendeeName} requested a recording for ${event.title}`
             });
         }
+
+        // Log Activity
+        await logActivity(req.user?.userId || 'system', "Recording Requested", { eventId: event._id, title: event.title }, req);
 
         // Send confirmation email to attendee
         const nodemailer = require('nodemailer');

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import path from "path";
 import User from '../models/user.model';
 import ActivityLog from '../models/activityLog.model';
+import { logActivity } from '../services/activityLog.service';
 import { sendProfileUpdateNotificationToUser, sendProfileUpdateNotificationToAdmin } from '../services/mail.service';
 
 export const getUserProfile = async (req: Request, res: Response): Promise<void> => {
@@ -76,12 +77,7 @@ export const updateUserProfile = async (req: Request, res: Response): Promise<vo
         }
 
         // Log Activity
-        await ActivityLog.create({
-            user: userId,
-            action: "Profile Update",
-            details: { fields: Object.keys(filteredUpdate) },
-            ip: req.ip
-        });
+        await logActivity(userId, "Profile Update", { fields: Object.keys(filteredUpdate) }, req);
 
         // Notifications (Async/Fire & Forget)
         if (user) {
@@ -147,12 +143,7 @@ export const uploadAvatar = async (req: Request, res: Response): Promise<void> =
             return;
         }
 
-        await ActivityLog.create({
-            user: userId,
-            action: "Avatar Update",
-            details: { filename: file.filename || path.basename(avatarUrl) },
-            ip: req.ip
-        });
+        await logActivity(userId, "Avatar Update", { filename: file.filename || path.basename(avatarUrl) }, req);
 
         // Notifications
         const changes = ["Updated Profile Picture"];

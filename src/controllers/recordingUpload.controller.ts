@@ -26,6 +26,7 @@ import {
     getPublicUrl,
 } from '../services/s3.service';
 import Session from '../models/session.model';
+import { logActivity } from '../services/activityLog.service';
 
 /* ─────────────────────────────────────────────
  * In-memory buffer per active upload
@@ -100,8 +101,9 @@ export const initRecordingUpload = async (req: Request, res: Response): Promise<
         });
 
         // Mark session as recording
-        session.recordingStatus = 'recording';
         await session.save();
+
+        await logActivity(userId as string, "Recording Started", { sessionId: session._id, title: session.title }, req);
 
         res.json({ message: 'Recording upload initialised', data: { uploadId } });
     } catch (error) {
@@ -208,6 +210,7 @@ export const finalizeRecordingUpload = async (req: Request, res: Response): Prom
             session.recordingUrl = finalUrl;
             session.recordingStatus = 'processed';
             await session.save();
+            await logActivity(req.user?.userId as string, "Recording Ready", { sessionId: session._id, title: session.title, url: finalUrl }, req);
         }
 
         // Audit log

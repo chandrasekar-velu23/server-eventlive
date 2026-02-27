@@ -5,6 +5,7 @@ import Session from '../models/session.model';
 import User from '../models/user.model';
 import { sendEventCreationNotificationToAdmin, sendSessionFeedbackEmail, sendEnrollmentConfirmation } from '../services/mail.service';
 import { sendNotification } from '../services/websocket.service';
+import { logActivity } from '../services/activityLog.service';
 import { config } from '../config';
 
 export const createEvent = async (req: Request, res: Response): Promise<void> => {
@@ -72,6 +73,8 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     // Trigger Admin Notification
     // We do this asynchronously without awaiting to not block response
     sendEventCreationNotificationToAdmin(newEvent, newEvent.organizerDisplayName || "Organizer").catch((err: any) => console.error(err));
+
+    await logActivity(userId, "Event Created", { eventId: newEvent._id, title: newEvent.title }, req);
 
     res.status(201).json({
       message: "Event created successfully",
@@ -293,6 +296,8 @@ export const enrollEvent = async (req: Request, res: Response): Promise<void> =>
         // Don't fail enrollment if email fails
       }
     }
+
+    await logActivity(userId, "Event Enrollment", { eventId: id, title: event.title }, req);
 
     res.status(200).json({
       message: "Enrolled successfully",

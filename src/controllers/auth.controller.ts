@@ -6,6 +6,7 @@ import User from "../models/user.model";
 import { OAuth2Client } from "google-auth-library";
 import { sendWelcomeEmail, sendPasswordResetEmail } from "../services/mail.service";
 import { createSession } from "../services/session.service";
+import { logActivity } from "../services/activityLog.service";
 
 /* ---------------------------------------------------
  * JWT helpers
@@ -76,6 +77,8 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
     // Send Welcome Email (Fire & Forget)
     sendWelcomeEmail(user.email, user.name);
 
+    await logActivity(user._id.toString(), "User Signup", { method: "Email" }, req);
+
     await sendAuthResponse(req, res, user);
   } catch (error) {
     console.error("Signup error:", error);
@@ -109,6 +112,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
+
+    await logActivity(user._id.toString(), "User Login", { method: "Email" }, req);
 
     await sendAuthResponse(req, res, user);
   } catch (error) {
@@ -194,6 +199,8 @@ export const googleAuth = async (
         await user.save();
       }
     }
+
+    await logActivity(user._id.toString(), user.isNew ? "User Signup" : "User Login", { method: "Google" }, req);
 
     await sendAuthResponse(req, res, user);
   } catch (error) {

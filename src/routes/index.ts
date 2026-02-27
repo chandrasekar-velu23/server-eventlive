@@ -5,6 +5,7 @@ import sessionRoutes from './session.routes';
 import userRoutes from './user.routes';
 import speakerRoutes from './speaker.routes';
 import analyticsRoutes from './analytics.routes';
+import chatbotRoutes from './chatbot.routes';
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use('/sessions', sessionRoutes);
 router.use('/users', userRoutes);
 router.use('/speakers', speakerRoutes);
 router.use('/stats', analyticsRoutes);
+router.use('/chat', chatbotRoutes);
 
 export default router;

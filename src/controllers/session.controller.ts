@@ -7,6 +7,7 @@ import Question from '../models/question.model';
 import { uploadFile } from '../services/s3.service';
 import Event from '../models/event.model';
 import { sendSessionStartedEmail } from '../services/mail.service';
+import { logActivity } from '../services/activityLog.service';
 
 /**
  * Create a new session for an event
@@ -54,6 +55,8 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
     });
 
     await session.save();
+
+    await logActivity(userId as string, "Session Created", { sessionId: session._id, title: session.title }, req);
 
     res.status(201).json({
       message: 'Session created successfully',
@@ -217,6 +220,8 @@ export const joinSession = async (req: Request, res: Response): Promise<void> =>
       // Don't fail the join if logging fails
     }
 
+    await logActivity(userId as string, "Session Joined", { sessionId, title: session.title }, req);
+
     res.status(200).json({
       message: 'Successfully joined session',
       data: session,
@@ -265,6 +270,8 @@ export const leaveSession = async (req: Request, res: Response): Promise<void> =
       console.error("Failed to log check-out:", logError);
       // Don't fail the leave if logging fails
     }
+
+    await logActivity(userId as string, "Session Left", { sessionId, title: session.title }, req);
 
     res.status(200).json({ message: 'Successfully left session' });
   } catch (error) {
@@ -336,6 +343,8 @@ export const startSession = async (req: Request, res: Response): Promise<void> =
       console.error("Failed to send session started emails:", emailError);
     }
 
+    await logActivity(req.user?.userId as string, "Session Started", { sessionId, title: session.title }, req);
+
     res.status(200).json({
       message: 'Session started successfully',
       data: session,
@@ -366,6 +375,8 @@ export const endSession = async (req: Request, res: Response): Promise<void> => 
       res.status(404).json({ message: 'Session not found' });
       return;
     }
+
+    await logActivity(req.user?.userId as string, "Session Ended", { sessionId, title: session.title }, req);
 
     res.status(200).json({
       message: 'Session ended successfully',
