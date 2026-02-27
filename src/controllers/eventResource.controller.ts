@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import Event from '../models/event.model';
 import User from '../models/user.model';
-import { sendSessionFeedbackEmail } from '../services/mail.service';
+import { sendSessionFeedbackEmail, sendResourceRequestConfirmation } from '../services/mail.service';
 import { sendNotification } from '../services/websocket.service';
 import { logActivity } from '../services/activityLog.service';
 
@@ -54,31 +54,13 @@ export const requestTranscript = async (req: Request, res: Response) => {
         // Log Activity
         await logActivity(req.user?.userId || 'system', "Transcript Requested", { eventId: event._id, title: event.title }, req);
 
-        // Send confirmation email to attendee
-        const nodemailer = require('nodemailer');
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
-            },
-        });
-
-        await transporter.sendMail({
-            from: `"EventLive Support" <${process.env.EMAIL_USER}>`,
-            to: attendeeEmail,
-            subject: `Transcript Request Received - ${eventTitle}`,
-            html: `
-        <h3>Transcript Request Confirmed</h3>
-        <p>Hello ${attendeeName},</p>
-        <p>We've received your request for the transcript of <strong>${eventTitle}</strong>.</p>
-        <p>Our team will process your request and send you the transcript within 24 hours.</p>
-        <p>You'll receive an email at <strong>${attendeeEmail}</strong> once it's ready.</p>
-        <br/>
-        <p>Thank you for attending!</p>
-        <p>- EventLive Team</p>
-      `,
-        });
+        // Send confirmation email to attendee via GAS Proxy
+        await sendResourceRequestConfirmation(
+            attendeeEmail,
+            attendeeName,
+            eventTitle,
+            'transcript'
+        );
 
         res.status(200).json({
             message: 'Transcript request received. You will receive an email notification once ready.',
@@ -142,31 +124,13 @@ export const requestRecording = async (req: Request, res: Response) => {
         // Log Activity
         await logActivity(req.user?.userId || 'system', "Recording Requested", { eventId: event._id, title: event.title }, req);
 
-        // Send confirmation email to attendee
-        const nodemailer = require('nodemailer');
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
-            },
-        });
-
-        await transporter.sendMail({
-            from: `"EventLive Support" <${process.env.EMAIL_USER}>`,
-            to: attendeeEmail,
-            subject: `Recording Request Received - ${eventTitle}`,
-            html: `
-        <h3>Recording Request Confirmed</h3>
-        <p>Hello ${attendeeName},</p>
-        <p>We've received your request for the recording of <strong>${eventTitle}</strong>.</p>
-        <p>Our team will process your request and send you the recording link within 24 hours.</p>
-        <p>You'll receive an email at <strong>${attendeeEmail}</strong> once it's ready.</p>
-        <br/>
-        <p>Thank you for attending!</p>
-        <p>- EventLive Team</p>
-      `,
-        });
+        // Send confirmation email to attendee via GAS Proxy
+        await sendResourceRequestConfirmation(
+            attendeeEmail,
+            attendeeName,
+            eventTitle,
+            'recording'
+        );
 
         res.status(200).json({
             message: 'Recording request received. You will receive an email notification once ready.',

@@ -11,13 +11,10 @@ export const logActivity = async (
     req?: Request
 ) => {
     try {
-        const ip = req?.ip || req?.socket?.remoteAddress || "Unknown";
-
         const log = await ActivityLog.create({
             user: userId,
             action,
-            details,
-            ip: ip.toString()
+            details
         });
 
         console.log(`[ACTIVITY LOG] User: ${userId} | Action: ${action}`);

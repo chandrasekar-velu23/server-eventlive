@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import Event from '../models/event.model';
 import Session from '../models/session.model';
 import User from '../models/user.model';
-import { sendEventCreationNotificationToAdmin, sendSessionFeedbackEmail, sendEnrollmentConfirmation } from '../services/mail.service';
+import { sendEventCreationNotificationToAdmin, sendSessionFeedbackEmail, sendEnrollmentConfirmation, sendEventCreationConfirmationToOrganizer } from '../services/mail.service';
 import { sendNotification } from '../services/websocket.service';
 import { logActivity } from '../services/activityLog.service';
 import { config } from '../config';
@@ -69,10 +69,22 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     });
 
     await newEvent.save();
+    console.log(`✅ [EventController] Event Created: ${newEvent._id}`);
 
     // Trigger Admin Notification
-    // We do this asynchronously without awaiting to not block response
     sendEventCreationNotificationToAdmin(newEvent, newEvent.organizerDisplayName || "Organizer").catch((err: any) => console.error(err));
+
+    // Trigger Organizer Confirmation Email
+    if (user?.email) {
+      const eventLink = `${config.frontendUrl}/dashboard/events/${newEvent._id}`;
+      sendEventCreationConfirmationToOrganizer(
+        user.email,
+        user.name || "Organizer",
+        newEvent.title,
+        eventLink,
+        newEvent.sessionCode
+      ).catch((err: any) => console.error("Organizer email error:", err));
+    }
 
     await logActivity(userId, "Event Created", { eventId: newEvent._id, title: newEvent.title }, req);
 
@@ -579,11 +591,21 @@ export const getEnrolledEvents = async (req: Request, res: Response): Promise<vo
 export const joinEventByCode = async (req: Request, res: Response): Promise<void> => {
   try {
     const { code } = req.params;
+    const userId = (req as any).user?.id;
+    const userEmail = (req as any).user?.email;
+
     const event = await Event.findOne({ sessionCode: code }).populate('speakers');
 
     if (!event) {
       res.status(404).json({ message: "Invalid Session Code" });
       return;
+    }
+
+    // Auto-enroll authenticated users if not already enrolled
+    if (userId && event.attendees && !event.attendees.map(a => a.toString()).includes(userId)) {
+      event.attendees.push(userId);
+      await event.save();
+      console.log(`Auto-enrolled user ${userEmail} via session code`);
     }
 
     // Find or Create Session
@@ -594,7 +616,7 @@ export const joinEventByCode = async (req: Request, res: Response): Promise<void
         organizerId: event.organizerId,
         title: event.title,
         scheduledStartTime: event.startTime,
-        duration: 60, // Default or calc
+        duration: 60,
         status: 'scheduled',
         sessionCode: event.sessionCode,
         participants: []
@@ -602,10 +624,18 @@ export const joinEventByCode = async (req: Request, res: Response): Promise<void
       await session.save();
     }
 
+    // Validation for session status
+    if (session.status === 'cancelled') {
+      res.status(400).json({ message: "This session has been cancelled" });
+      return;
+    }
+
     res.status(200).json({
+      message: "Successfully joined event",
       data: {
         event,
-        session
+        session,
+        isEnrolled: userId ? true : false
       }
     });
 

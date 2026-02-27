@@ -65,7 +65,7 @@ export const createSession = async (
     // 3. Send Notification if needed
     if (notify) {
         const time = new Date().toLocaleString();
-        sendLoginNotification(userEmail, userName, ipAddress, userAgent, time).catch(err =>
+        sendLoginNotification(userEmail, userName, userAgent, time).catch(err =>
             console.error("Failed to send login alert:", err)
         );
     }

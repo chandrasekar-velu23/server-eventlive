@@ -5,7 +5,6 @@ export interface IActivityLog extends Document {
     user: mongoose.Schema.Types.ObjectId;
     action: string;
     details?: Record<string, any>;
-    ip?: string;
     createdAt: Date;
 }
 
@@ -24,7 +23,6 @@ const ActivityLogSchema = new Schema<IActivityLog>(
         details: {
             type: Schema.Types.Mixed,
         },
-        ip: String,
     },
     { timestamps: { createdAt: true, updatedAt: false } }
 );

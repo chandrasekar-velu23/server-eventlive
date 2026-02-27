@@ -65,9 +65,9 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
 /**
  * 2. Send Login Notification
  */
-export const sendLoginNotification = async (email: string, name: string, ip: string, device: string, time: string) => {
-  logEmailInDev('sendLoginNotification', email, `IP: ${ip}`);
-  await postToGas("sendLoginNotification", { email, name, ip, device, time });
+export const sendLoginNotification = async (email: string, name: string, device: string, time: string) => {
+  logEmailInDev('sendLoginNotification', email);
+  await postToGas("sendLoginNotification", { email, name, device, time });
 };
 
 /**
@@ -132,6 +132,14 @@ export const sendEventCreationNotificationToAdmin = async (eventDetails: any, or
   if (safeDetails.endTime instanceof Date) safeDetails.endTime = safeDetails.endTime.toISOString();
 
   await postToGas("sendEventCreationNotificationToAdmin", { eventDetails: safeDetails, organizerName });
+};
+
+/**
+ * 8b. Send Event Creation Confirmation to Organizer
+ */
+export const sendEventCreationConfirmationToOrganizer = async (email: string, name: string, eventTitle: string, eventLink: string, sessionCode: string) => {
+  logEmailInDev('sendEventCreationConfirmationToOrganizer', email, `Event: ${eventTitle}`);
+  await postToGas("sendEventCreationConfirmationToOrganizer", { email, name, eventTitle, eventLink, sessionCode });
 };
 
 /**
@@ -222,6 +230,14 @@ export const sendRequestEmail = async (fromEmail: string, fromName: string, type
   const target = type === "support" ? "Support" : "Admin";
   logEmailInDev('sendRequestEmail', target, `From: ${fromEmail}`);
   await postToGas("sendRequestEmail", { fromEmail, fromName, type, subject, content });
+};
+
+/**
+ * 15b. Send Resource Request Confirmation (to Attendee)
+ */
+export const sendResourceRequestConfirmation = async (email: string, name: string, eventTitle: string, type: 'transcript' | 'recording') => {
+  logEmailInDev('sendResourceRequestConfirmation', email, `Type: ${type}`);
+  await postToGas("sendResourceRequestConfirmation", { email, name, eventTitle, type });
 };
 
 /**
