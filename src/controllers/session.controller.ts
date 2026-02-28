@@ -164,7 +164,7 @@ export const joinSession = async (req: Request, res: Response): Promise<void> =>
     const userId = req.user?.userId;
     const userName = req.user?.name || "Unknown User";
     const userEmail = req.user?.email || "unknown@email.com";
-    const { role = 'attendee' } = req.body;
+    const { role = 'attendee', isMuted = true, videoEnabled = false } = req.body;
 
     const session = await Session.findById(sessionId);
     if (!session) {
@@ -188,13 +188,17 @@ export const joinSession = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Determine initial status based on session settings
+    const status = (session.requireApproval && role === 'attendee') ? 'pending' : 'active';
+
     // Add participant
     const newParticipant: IParticipantSession = {
       userId,
       joinedAt: new Date(),
       role: role as any,
-      isMuted: true,
-      videoEnabled: false,
+      status,
+      isMuted,
+      videoEnabled: videoEnabled as boolean,
       screenshareActive: false,
       reactions: [],
       handRaised: false,

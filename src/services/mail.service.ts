@@ -248,6 +248,14 @@ export const sendSessionStartedEmail = async (email: string, name: string, sessi
   await postToGas("sendSessionStartedEmail", { email, name, sessionTitle, joinLink });
 };
 
+/**
+ * 17. Send Lobby Wait Notification to Organizer
+ */
+export const sendLobbyWaitNotification = async (organizerEmail: string, participantName: string, eventTitle: string) => {
+  logEmailInDev('sendLobbyWaitNotification', organizerEmail, `Participant: ${participantName}`);
+  await postToGas("sendLobbyWaitNotification", { organizerEmail, participantName, eventTitle });
+};
+
 export default {
   sendWelcomeEmail,
   sendLoginNotification,
@@ -264,5 +272,7 @@ export default {
   bulkSendSessionLinks,
   sendAttendeeEmail,
   sendRequestEmail,
+  sendLobbyWaitNotification,
 };
+
 

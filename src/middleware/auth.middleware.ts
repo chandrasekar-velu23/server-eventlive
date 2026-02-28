@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { validateSession } from "../services/session.service";
+import { config } from "../config";
 
 export const authGuard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const authHeader = req.headers.authorization;
@@ -14,25 +15,24 @@ export const authGuard = async (req: Request, res: Response, next: NextFunction)
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
+    const decoded = jwt.verify(token, config.jwtSecret) as any;
 
     // Session Validation (Server-side check)
     if (!decoded.jti) {
-      // Enforce new session policy
-      res.status(401).json({ message: "Invalid session" });
+      res.status(401).json({ message: "Invalid session structure: Missing JTI" });
       return;
     }
 
     const session = await validateSession(decoded.jti);
     if (!session) {
-      res.status(401).json({ message: "Session expired due to inactivity" });
+      res.status(401).json({ message: "Session expired or invalid due to inactivity" });
       return;
     }
 
     (req as any).user = decoded;
     next();
   } catch (error: any) {
-    const message = error.name === "TokenExpiredError" ? "Token expired" : "Invalid token";
+    const message = error.name === "TokenExpiredError" ? "Token expired" : "Invalid token authentication";
     res.status(403).json({ message });
   }
 };
@@ -48,7 +48,7 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
+    const decoded = jwt.verify(token, config.jwtSecret) as any;
 
     // Check session if token is valid
     if (decoded.jti) {

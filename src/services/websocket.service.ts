@@ -7,7 +7,9 @@ import Poll from '../models/poll.model';
 import Question from '../models/question.model';
 import { hasPermission, ROLE_PERMISSIONS } from '../middleware/rbac.middleware';
 import { logCheckIn, logCheckOut } from './attendance.service';
+import { sendLobbyWaitNotification } from './mail.service';
 import ActivityLog from '../models/activityLog.model';
+import User from '../models/user.model';
 
 /**
  * Real-Time Event Handlers for WebSocket
@@ -102,28 +104,37 @@ export const initializeWebSocket = (io: Server) => {
 
     socket.on('join-session', async (data: any) => {
       try {
-        const { sessionId } = data;
+        const { sessionId, roomId, isMuted: initialMuted, videoEnabled: initialVideo } = data; // sessionId is internal ID, roomId is sessionCode
         const userId = socket.data.user?.userId;
 
-        if (!sessionId || !userId) {
-          socket.emit('error', { message: 'Missing sessionId or userId' });
+        if ((!sessionId && !roomId) || !userId) {
+          socket.emit('error', { message: 'Missing sessionId/roomId or userId' });
           return;
-        }
-
-        // Join Socket.io room
-        socket.join(sessionId);
-
-        // Track which sessions this socket has joined (for clean disconnect)
-        if (!socket.data.joinedSessions) socket.data.joinedSessions = [];
-        if (!socket.data.joinedSessions.includes(sessionId)) {
-          socket.data.joinedSessions.push(sessionId);
         }
 
         // Add participant to database
-        const session = await Session.findById(sessionId);
+        let session;
+        if (sessionId) {
+          session = await Session.findById(sessionId);
+        } else if (roomId) {
+          session = await Session.findOne({ sessionCode: roomId });
+        }
+
         if (!session) {
           socket.emit('error', { message: 'Session not found' });
           return;
+        }
+
+        const actualSessionId = session._id.toString();
+        const roomName = session.sessionCode || actualSessionId; // Prefer sessionCode as room ID
+
+        // Join Socket.io room
+        socket.join(roomName);
+
+        // Track which sessions this socket has joined
+        if (!socket.data.joinedSessions) socket.data.joinedSessions = [];
+        if (!socket.data.joinedSessions.includes(actualSessionId)) {
+          socket.data.joinedSessions.push(actualSessionId);
         }
 
         // Check session is not ended
@@ -137,21 +148,29 @@ export const initializeWebSocket = (io: Server) => {
           (p: IParticipant) => p.userId.toString() === userId
         );
 
+        let status: 'pending' | 'approved' | 'rejected' | 'active' = 'active';
+
         if (existingParticipant) {
-          // Update leftAt to null in case they re-joined
           existingParticipant.leftAt = undefined;
           role = existingParticipant.role;
+          status = existingParticipant.status;
           await session.save();
         } else {
           // Check if organizer
           role = session.organizerId.toString() === userId ? 'organizer' : 'attendee';
 
+          // Handle Approval Requirement
+          if (session.requireApproval && role === 'attendee') {
+            status = 'pending';
+          }
+
           session.participants.push({
             userId,
             joinedAt: new Date(),
             role: role as any,
-            isMuted: true,
-            videoEnabled: false,
+            status,
+            isMuted: initialMuted !== undefined ? initialMuted : true,
+            videoEnabled: initialVideo !== undefined ? initialVideo : false,
             screenshareActive: false,
             reactions: [],
             handRaised: false,
@@ -159,53 +178,84 @@ export const initializeWebSocket = (io: Server) => {
           });
 
           await session.save();
+
+          // If pending, notify organizer
+          if (status === 'pending') {
+            const organizer = await User.findById(session.organizerId);
+            if (organizer && organizer.email) {
+              sendLobbyWaitNotification(
+                organizer.email,
+                socket.data.user?.name || "A participant",
+                session.title
+              ).catch(err => console.error("Lobby email error:", err));
+            }
+          }
         }
 
-        // Cache role + permissions in socket.data to avoid DB lookup on every event
+        // Cache state in socket
         socket.data.sessionRole = role;
         socket.data.sessionPermissions = role === 'organizer'
-          ? '*'  // all
+          ? '*'
           : (ROLE_PERMISSIONS[role] || []);
-        socket.data.currentSessionId = sessionId;
+        socket.data.currentSessionId = actualSessionId;
+        socket.data.currentRoomId = roomName;
 
-        // Broadcast to room
-        sessionNamespace.to(sessionId).emit('participant-joined', {
-          userId,
-          userName: socket.data.user?.name,
-          userAvatar: socket.data.user?.avatar,
-          role,
-          participantCount: session.participants.filter((p: IParticipant) => !p.leftAt).length,
-          timestamp: new Date(),
-        });
+        // Broadcast to room if approved
+        if (status === 'active' || status === 'approved') {
+          sessionNamespace.to(roomName).emit('participant-joined', {
+            userId,
+            socketId: socket.id,
+            userName: socket.data.user?.name,
+            userAvatar: socket.data.user?.avatar,
+            role,
+            participantCount: session.participants.filter((p: IParticipant) => !p.leftAt && (p.status === 'active' || p.status === 'approved')).length,
+            timestamp: new Date(),
+          });
+        } else if (status === 'pending') {
+          // Notify organizer about waiting participant
+          sessionNamespace.to(session.organizerId.toString()).emit('participant-waiting', {
+            userId,
+            userName: socket.data.user?.name,
+            userAvatar: socket.data.user?.avatar,
+            timestamp: new Date(),
+          });
+
+          socket.emit('waiting-for-approval', {
+            message: 'Your request to join is pending approval.',
+          });
+        }
 
         // Trigger Analytics Update for Organizer
-        if (session.organizerId) {
+        if (session.organizerId && (status === 'active' || status === 'approved')) {
           sendStatsUpdate(session.organizerId.toString(), {
             type: 'attendance',
             eventId: session.eventId,
-            sessionId: session._id,
+            sessionId: actualSessionId,
             delta: 1,
             total: session.participants.filter((p: IParticipant) => !p.leftAt).length
           });
         }
 
-        // Log Check-in
-        try {
-          await logCheckIn({
-            eventId: session.eventId.toString(),
-            sessionId,
-            userId,
-            userEmail: socket.data.user?.email || "",
-            userName: socket.data.user?.name || "Unknown",
-          });
-        } catch (logError) {
-          console.error("Failed to log check-in in WS:", logError);
+        // Log Check-in (only if active/approved)
+        if (status === 'active' || status === 'approved') {
+          try {
+            await logCheckIn({
+              eventId: session.eventId.toString(),
+              sessionId: actualSessionId,
+              userId,
+              userEmail: socket.data.user?.email || "",
+              userName: socket.data.user?.name || "Unknown",
+            });
+          } catch (logError) {
+            console.error("Failed to log check-in in WS:", logError);
+          }
         }
 
         socket.emit('session-joined', {
-          message: 'Successfully joined session',
+          message: 'Successfully processed join request',
           participants: session.participants.filter((p: IParticipant) => !p.leftAt).length,
           role,
+          status,
           sessionCode: session.sessionCode,
           sessionSettings: {
             chatEnabled: session.chatEnabled,
@@ -220,13 +270,78 @@ export const initializeWebSocket = (io: Server) => {
       }
     });
 
+    socket.on('approve-participant', async (data) => {
+      try {
+        const { sessionId, participantUserId } = data;
+        const userId = socket.data.user?.userId;
+
+        const session = await Session.findById(sessionId);
+        if (!session) return;
+
+        if (session.organizerId.toString() !== userId) {
+          socket.emit('error', { message: 'Only organizer can approve' });
+          return;
+        }
+
+        const participant = session.participants.find(p => p.userId.toString() === participantUserId);
+        if (participant) {
+          participant.status = 'approved';
+          await session.save();
+
+          const roomName = session.sessionCode || sessionId;
+
+          // Notify the participant
+          sessionNamespace.to(participantUserId).emit('approved', { sessionId, roomName });
+
+          // Broadcast to room
+          const userObj = await User.findById(participantUserId);
+          sessionNamespace.to(roomName).emit('participant-joined', {
+            userId: participantUserId,
+            userName: userObj?.name,
+            userAvatar: userObj?.avatar,
+            role: participant.role,
+            participantCount: session.participants.filter(p => !p.leftAt && (p.status === 'active' || p.status === 'approved')).length,
+            timestamp: new Date(),
+          });
+        }
+      } catch (error) {
+        console.error('Approve participant error:', error);
+      }
+    });
+
+    socket.on('reject-participant', async (data) => {
+      try {
+        const { sessionId, participantUserId } = data;
+        const userId = socket.data.user?.userId;
+
+        const session = await Session.findById(sessionId);
+        if (!session) return;
+
+        if (session.organizerId.toString() !== userId) {
+          socket.emit('error', { message: 'Only organizer can reject' });
+          return;
+        }
+
+        const participant = session.participants.find(p => p.userId.toString() === participantUserId);
+        if (participant) {
+          participant.status = 'rejected';
+          await session.save();
+
+          sessionNamespace.to(participantUserId).emit('rejected', { sessionId, message: 'Your join request was declined.' });
+        }
+      } catch (error) {
+        console.error('Reject participant error:', error);
+      }
+    });
+
     socket.on('leave-session', async (data) => {
       try {
         const { sessionId } = data;
         const userId = socket.data.user?.userId;
+        const roomName = socket.data.currentRoomId || sessionId;
 
         // Leave Socket.io room
-        socket.leave(sessionId);
+        socket.leave(roomName);
 
         // Update participant in database
         const session = await Session.findById(sessionId);
@@ -241,10 +356,11 @@ export const initializeWebSocket = (io: Server) => {
         }
 
         // Broadcast to room
-        sessionNamespace.to(sessionId).emit('participant-left', {
+        sessionNamespace.to(roomName).emit('participant-left', {
           userId,
+          socketId: socket.id,
           userName: socket.data.user?.name,
-          participantCount: session?.participants.length || 0,
+          participantCount: session?.participants.filter(p => !p.leftAt).length || 0,
           timestamp: new Date(),
         });
 
@@ -255,7 +371,7 @@ export const initializeWebSocket = (io: Server) => {
             eventId: session.eventId,
             sessionId: session._id,
             delta: -1,
-            total: session.participants.length
+            total: session.participants.filter(p => !p.leftAt).length
           });
         }
 
@@ -300,7 +416,8 @@ export const initializeWebSocket = (io: Server) => {
         await session.save();
 
         // Broadcast to room
-        sessionNamespace.to(sessionId).emit('session-ended', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('session-ended', {
           endedBy: userId,
           timestamp: new Date()
         });
@@ -367,7 +484,8 @@ export const initializeWebSocket = (io: Server) => {
         await message.save();
 
         // Broadcast to room
-        sessionNamespace.to(sessionId).emit('new-message', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('new-message', {
           _id: message._id.toString(),
           senderId: userId,
           senderName: socket.data.user?.name,
@@ -407,7 +525,8 @@ export const initializeWebSocket = (io: Server) => {
         await ChatMessage.findByIdAndDelete(messageId);
 
         // Broadcast deletion
-        sessionNamespace.to(sessionId).emit('message-deleted', { messageId });
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('message-deleted', { messageId });
       } catch (error) {
         console.error('Delete message error:', error);
         socket.emit('error', { message: 'Failed to delete message' });
@@ -457,7 +576,8 @@ export const initializeWebSocket = (io: Server) => {
         await poll.save();
 
         // Broadcast new poll to all in session
-        sessionNamespace.to(sessionId).emit('new-poll', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('new-poll', {
           _id: poll._id.toString(),
           question: poll.question,
           options: poll.options,
@@ -531,7 +651,8 @@ export const initializeWebSocket = (io: Server) => {
         }));
 
         // Broadcast poll update
-        sessionNamespace.to(sessionId).emit('poll-updated', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('poll-updated', {
           pollId,
           results,
           respondentCount: poll.respondents.length,
@@ -597,7 +718,8 @@ export const initializeWebSocket = (io: Server) => {
         await question.save();
 
         // Broadcast updated upvote list
-        sessionNamespace.to(sessionId).emit('question-upvoted', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('question-upvoted', {
           questionId: question._id.toString(),
           upvotes,
         });
@@ -632,7 +754,8 @@ export const initializeWebSocket = (io: Server) => {
         await question.save();
 
         // Broadcast new question
-        sessionNamespace.to(sessionId).emit('new-question', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('new-question', {
           _id: question._id,
           askedBy: userId,
           askedByName: socket.data.user?.name,
@@ -687,7 +810,8 @@ export const initializeWebSocket = (io: Server) => {
         }
 
         // Broadcast question answered
-        sessionNamespace.to(sessionId).emit('question-answered', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('question-answered', {
           questionId,
           answer,
           answeredBy: socket.data.user?.name,
@@ -710,7 +834,8 @@ export const initializeWebSocket = (io: Server) => {
         const userId = socket.data.user?.userId;
 
         // Broadcast reaction to room
-        sessionNamespace.to(sessionId).emit('participant-reaction', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('participant-reaction', {
           userId,
           userName: socket.data.user?.name,
           emoji,
@@ -728,7 +853,7 @@ export const initializeWebSocket = (io: Server) => {
 
     socket.on('update-media-state', async (data) => {
       try {
-        const { sessionId, isMuted, videoEnabled } = data;
+        const { sessionId, isMuted, videoEnabled, screenshareActive } = data;
         const userId = socket.data.user?.userId;
 
         // Update participant state
@@ -740,15 +865,18 @@ export const initializeWebSocket = (io: Server) => {
           if (participant) {
             if (isMuted !== undefined) participant.isMuted = isMuted;
             if (videoEnabled !== undefined) participant.videoEnabled = videoEnabled;
+            if (screenshareActive !== undefined) participant.screenshareActive = screenshareActive;
             await session.save();
           }
         }
 
         // Broadcast media state change
-        sessionNamespace.to(sessionId).emit('participant-media-changed', {
+        const roomName = socket.data.currentRoomId || sessionId;
+        sessionNamespace.to(roomName).emit('participant-media-changed', {
           userId,
           isMuted,
           videoEnabled,
+          screenshareActive
         });
       } catch (error) {
         console.error('Update media state error:', error);
@@ -760,31 +888,42 @@ export const initializeWebSocket = (io: Server) => {
      */
 
     socket.on('webrtc-offer', (data) => {
-      const { sessionId, to, offer } = data;
-      // If 'to' is specified, send to that user, otherwise broadcast (legacy/mesh fallback)
-      const target = to ? sessionNamespace.to(to) : sessionNamespace.to(sessionId);
-      target.emit('webrtc-offer', {
-        from: socket.data.user?.userId,
-        offer,
-      });
+      const { sessionId, roomId, to, offer } = data;
+      const roomToEmit = to || roomId || socket.data.currentRoomId || sessionId;
+      console.log(`[WebRTC] Offer from ${socket.id} to ${roomToEmit}`);
+
+      if (roomToEmit) {
+        sessionNamespace.to(roomToEmit).emit('webrtc-offer', {
+          from: socket.id,
+          fromUserId: socket.data.user?.userId || socket.data.user?.id,
+          offer,
+        });
+      }
     });
 
     socket.on('webrtc-answer', (data) => {
-      const { sessionId, to, answer } = data;
-      const target = to ? sessionNamespace.to(to) : sessionNamespace.to(sessionId);
-      target.emit('webrtc-answer', {
-        from: socket.data.user?.userId,
-        answer,
-      });
+      const { sessionId, roomId, to, answer } = data;
+      const roomToEmit = to || roomId || socket.data.currentRoomId || sessionId;
+      console.log(`[WebRTC] Answer from ${socket.id} to ${roomToEmit}`);
+
+      if (roomToEmit) {
+        sessionNamespace.to(roomToEmit).emit('webrtc-answer', {
+          from: socket.id,
+          fromUserId: socket.data.user?.userId || socket.data.user?.id,
+          answer,
+        });
+      }
     });
 
     socket.on('ice-candidate', (data) => {
-      const { sessionId, to, candidate } = data;
-      const target = to ? sessionNamespace.to(to) : sessionNamespace.to(sessionId);
-      target.emit('ice-candidate', {
-        from: socket.data.user?.userId,
-        candidate,
-      });
+      const { sessionId, roomId, to, candidate } = data;
+      const roomToEmit = to || roomId || socket.data.currentRoomId || sessionId;
+      if (roomToEmit) {
+        sessionNamespace.to(roomToEmit).emit('ice-candidate', {
+          from: socket.id,
+          candidate,
+        });
+      }
     });
 
     /**
@@ -793,8 +932,9 @@ export const initializeWebSocket = (io: Server) => {
     socket.on('file-transfer', (data) => {
       const { sessionId, transferData } = data;
       const userId = socket.data.user?.userId;
+      const roomName = socket.data.currentRoomId || sessionId;
       // Broadcast to all other participants in the session
-      socket.to(sessionId).emit('file-transfer', { transferData, fromUserId: userId });
+      socket.to(roomName).emit('file-transfer', { transferData, fromUserId: userId });
     });
 
     /**
@@ -824,8 +964,10 @@ export const initializeWebSocket = (io: Server) => {
           const activeCount = session.participants.filter((p: IParticipant) => !p.leftAt).length;
 
           // Notify others
-          sessionNamespace.to(sessionId).emit('participant-left', {
+          const roomName = session.sessionCode || sessionId;
+          sessionNamespace.to(roomName).emit('participant-left', {
             userId,
+            socketId: socket.id,
             userName: socket.data.user?.name,
             participantCount: activeCount,
             timestamp: new Date(),

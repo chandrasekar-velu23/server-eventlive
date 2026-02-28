@@ -10,6 +10,7 @@ export interface IParticipantSession {
   reactions: string[];
   handRaised: boolean;
   questionsAsked: number;
+  status: 'pending' | 'approved' | 'rejected' | 'active';
   leftAt?: Date;
 }
 
@@ -54,6 +55,7 @@ const ParticipantSchema = new Schema({
   reactions: [String],
   handRaised: { type: Boolean, default: false },
   questionsAsked: { type: Number, default: 0 },
+  status: { type: String, enum: ['pending', 'approved', 'rejected', 'active'], default: 'active' },
   leftAt: { type: Date }
 }, { _id: false });
 
