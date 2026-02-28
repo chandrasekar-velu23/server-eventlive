@@ -3,13 +3,15 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import path from "path";
+import helmet from "helmet";
 import { config } from "./config";
 import routes from "./routes";
 import errorHandler from "./middleware/error-handler";
 
-import helmet from "helmet";
-
 const app = express();
+
+// Logging - move to top
+app.use(morgan(config.env === "production" ? "combined" : "dev"));
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -28,12 +30,19 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      const dynamicAllowedOrigins = [
+        ...allowedOrigins,
+        config.frontendUrl,
+      ];
+
+      if (dynamicAllowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        console.warn(`CORS blocked for origin: ${origin}`);
+        callback(null, false); // Recommended over throwing an error for production
       }
     },
     credentials: true,
@@ -51,7 +60,14 @@ app.use("/public", express.static(path.join(__dirname, "../public")));
 
 app.use("/api", routes);
 
-app.use(morgan("dev"));
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: config.env,
+  });
+});
 
 app.get("/", (_req, res) => {
   res.json({
@@ -67,31 +83,6 @@ app.use((_req, res) => {
   });
 });
 
-app.get("/health", (_req, res) => {
-  res.status(200).json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: config.env,
-  });
-});
-
 app.use(errorHandler);
-
-app.use(
-  (
-    err: any,
-    _req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
-    console.error("Global Error:", err.message);
-
-    res.status(err.status || 500).json({
-      status: "error",
-      message: err.message || "Internal Server Error",
-    });
-  }
-);
 
 export default app;

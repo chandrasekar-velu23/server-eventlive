@@ -10,8 +10,9 @@ const PORT = config.port;
 
 
 connectDB().then(() => {
-
-  seedUsers();
+  if (config.env !== 'production') {
+    seedUsers();
+  }
 });
 
 
